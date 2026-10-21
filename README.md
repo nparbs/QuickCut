@@ -88,6 +88,10 @@ Code layout:
 | `quickcut/export_panel.py` | Export settings panel |
 | `quickcut/trim_bar.py` | Timeline widget with trim handles |
 
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for what's done, known limitations and future ideas.
+
 ## License
 
 MIT
