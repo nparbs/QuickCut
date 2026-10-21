@@ -1,11 +1,13 @@
-"""The right-hand panel: output format, video, compression, audio and join settings."""
+"""The right-hand panel: output format, video, compression, audio and join settings.
+
+Settings scroll; the summary, Export button and progress stay pinned at the bottom.
+"""
 from __future__ import annotations
 
 from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QProgressBar, QPushButton, QRadioButton, QSlider, QSpinBox, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from .command import TWO_PASS_FAMILIES
@@ -19,13 +21,15 @@ FPS_CHOICES = ["Same as source", "120", "60", "50", "30", "25", "24", "15", "10"
 PRESETS = [("High quality", "high"), ("Balanced", "medium"), ("Small file", "low"),
            ("Smallest file", "smallest")]
 MODES = [("Quality preset", "preset"), ("Target file size", "size"), ("Manual", "manual")]
-SPEEDS = [("Balanced", "balanced"), ("Slower, better compression", "quality"), ("Faster", "fast")]
+RATES = [("Constant quality", "quality"), ("Fixed bitrate", "bitrate")]
+SPEEDS = [("Balanced", "balanced"), ("Slower, smaller file", "quality"), ("Faster", "fast")]
 AUDIO_BITRATES = [64, 96, 128, 160, 192, 256, 320]
 SIZE_SHORTCUTS = [8, 10, 25, 50, 100, 500]
+LABEL_WIDTH = 92
 
 
-def _combo(items, parent=None) -> QComboBox:
-    box = QComboBox(parent)
+def _combo(items) -> QComboBox:
+    box = QComboBox()
     for label, data in items:
         box.addItem(label, data)
     return box
@@ -37,6 +41,23 @@ def _select(box: QComboBox, data):
         box.setCurrentIndex(i)
 
 
+def _group(title: str) -> tuple[QGroupBox, QFormLayout]:
+    box = QGroupBox(title)
+    form = QFormLayout(box)
+    form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+    form.setHorizontalSpacing(10)
+    form.setVerticalSpacing(8)
+    form.setContentsMargins(10, 12, 10, 10)
+    return box, form
+
+
+def _label(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setFixedWidth(LABEL_WIDTH)  # same column width in every group, so fields line up
+    return label
+
+
 class ExportPanel(QWidget):
     changed = Signal()
     exportRequested = Signal()
@@ -46,19 +67,21 @@ class ExportPanel(QWidget):
         super().__init__(parent)
         self._encoders: list[Encoder] = []
         self._saved_choice: dict[str, str] = {}   # codec/encoder restored before detection finishes
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        self._busy = False
+
+        content = QWidget()
+        body = QVBoxLayout(content)
+        body.setContentsMargins(8, 4, 12, 8)
+        body.setSpacing(10)
 
         # Output
-        out_box = QGroupBox("Output")
-        form = QFormLayout(out_box)
+        box, form = _group("Output")
         self.format = _combo(FORMATS)
-        form.addRow("Format", self.format)
-        layout.addWidget(out_box)
+        form.addRow(_label("Format"), self.format)
+        body.addWidget(box)
 
         # Video
-        video_box = QGroupBox("Video")
-        form = QFormLayout(video_box)
+        box, form = _group("Video")
         self.codec = QComboBox()
         self.encoder = QComboBox()
         self.encoder.setToolTip("GPU encoders are much faster. CPU encoders compress a little better "
@@ -71,144 +94,150 @@ class ExportPanel(QWidget):
         self.fps.addItems(FPS_CHOICES)
         self.fps.setToolTip("Pick a frame rate or type your own, e.g. 29.97")
         self.speed = _combo(SPEEDS)
-        form.addRow("Codec", self.codec)
-        form.addRow("Encoder", self.encoder)
-        form.addRow("Resolution", self.resolution)
-        form.addRow("Frame rate", self.fps)
-        form.addRow("Encode speed", self.speed)
-        layout.addWidget(video_box)
+        form.addRow(_label("Codec"), self.codec)
+        form.addRow(_label("Encoder"), self.encoder)
+        form.addRow(_label("Resolution"), self.resolution)
+        form.addRow(_label("Frame rate"), self.fps)
+        form.addRow(_label("Speed"), self.speed)
+        body.addWidget(box)
 
-        # Compression
-        comp_box = QGroupBox("Compression")
-        comp = QVBoxLayout(comp_box)
+        # Compression: one form, rows shown or hidden per mode so nothing leaves a gap.
+        box, form = _group("Compression")
+        self.comp_form = form
         self.mode = _combo(MODES)
-        comp.addWidget(self.mode)
-        self.pages = QStackedWidget()
-        comp.addWidget(self.pages)
+        form.addRow(_label("Mode"), self.mode)
 
-        page = QWidget()
-        f = QFormLayout(page)
-        f.setContentsMargins(0, 0, 0, 0)
         self.preset = _combo(PRESETS)
-        f.addRow("Quality", self.preset)
-        self.pages.addWidget(page)
+        form.addRow(_label("Quality"), self.preset)
 
-        page = QWidget()
-        v = QVBoxLayout(page)
-        v.setContentsMargins(0, 0, 0, 0)
-        row = QHBoxLayout()
         self.size_mb = QDoubleSpinBox()
         self.size_mb.setRange(0.5, 100000)
         self.size_mb.setDecimals(1)
         self.size_mb.setSuffix(" MB")
         self.size_mb.setValue(25)
-        row.addWidget(QLabel("Max size"))
-        row.addWidget(self.size_mb, 1)
-        v.addLayout(row)
-        row = QHBoxLayout()
+        form.addRow(_label("Max size"), self.size_mb)
+        self.size_shortcuts = shortcuts = QWidget()
+        row = QHBoxLayout(shortcuts)
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(4)
         for mb in SIZE_SHORTCUTS:
-            b = QPushButton(f"{mb}")
-            b.setFixedWidth(40)
+            b = QPushButton(str(mb))
             b.setToolTip(f"{mb} MB")
+            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            b.setMinimumWidth(28)
             b.clicked.connect(lambda _=False, mb=mb: self.size_mb.setValue(mb))
             row.addWidget(b)
-        row.addStretch()
-        v.addLayout(row)
-        self.two_pass = QCheckBox("Two-pass (more accurate size, CPU encoders only)")
+        form.addRow(_label(""), shortcuts)
+        self.two_pass = QCheckBox("Two-pass encoding")
+        self.two_pass.setToolTip("Encodes twice to hit the size more precisely. CPU encoders only.")
         self.two_pass.setChecked(True)
-        v.addWidget(self.two_pass)
-        self.pages.addWidget(page)
+        form.addRow(_label(""), self.two_pass)
 
-        page = QWidget()
-        f = QFormLayout(page)
-        f.setContentsMargins(0, 0, 0, 0)
-        self.rate_quality = QRadioButton("Constant quality")
-        self.rate_bitrate = QRadioButton("Bitrate")
-        self.rate_quality.setChecked(True)
-        group = QButtonGroup(self)
-        group.addButton(self.rate_quality)
-        group.addButton(self.rate_bitrate)
+        self.rate = _combo(RATES)
+        form.addRow(_label("Rate control"), self.rate)
         self.quality = QSpinBox()
         self.quality.setRange(0, 63)
         self.quality.setValue(23)
         self.quality.setToolTip("CRF / CQ value. Lower = better quality, bigger file. "
                                 "Typical: 18-28 for H.264, 22-32 for HEVC, 25-40 for AV1.")
+        form.addRow(_label("CRF / CQ"), self.quality)
         self.bitrate = QSpinBox()
         self.bitrate.setRange(100, 500000)
         self.bitrate.setSingleStep(500)
         self.bitrate.setValue(4000)
         self.bitrate.setSuffix(" kbps")
-        f.addRow(self.rate_quality, self.quality)
-        f.addRow(self.rate_bitrate, self.bitrate)
-        self.pages.addWidget(page)
-        layout.addWidget(comp_box)
+        form.addRow(_label("Bitrate"), self.bitrate)
+        body.addWidget(box)
 
         # Audio
-        audio_box = QGroupBox("Audio")
-        form = QFormLayout(audio_box)
+        box, form = _group("Audio")
         self.mute = QCheckBox("Remove audio")
         self.volume = QSlider(Qt.Horizontal)
         self.volume.setRange(0, 300)
         self.volume.setValue(100)
         self.volume_label = QLabel("100%")
-        self.volume_label.setMinimumWidth(40)
-        row = QHBoxLayout()
+        self.volume_label.setFixedWidth(40)
+        self.volume_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        volume_row = QWidget()
+        row = QHBoxLayout(volume_row)
+        row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self.volume, 1)
         row.addWidget(self.volume_label)
         self.audio_bitrate = _combo([(f"{k} kbps", k) for k in AUDIO_BITRATES])
         _select(self.audio_bitrate, 160)
-        form.addRow(self.mute)
-        form.addRow("Volume", row)
-        form.addRow("Bitrate", self.audio_bitrate)
-        layout.addWidget(audio_box)
+        form.addRow(_label(""), self.mute)
+        form.addRow(_label("Volume"), volume_row)
+        form.addRow(_label("Bitrate"), self.audio_bitrate)
+        body.addWidget(box)
 
         # Join
-        join_box = QGroupBox("Joining clips")
-        form = QFormLayout(join_box)
+        box, form = _group("Joining clips")
         self.crossfade_on = QCheckBox("Crossfade between clips")
         self.crossfade = QDoubleSpinBox()
         self.crossfade.setRange(0.1, 5.0)
         self.crossfade.setSingleStep(0.25)
         self.crossfade.setValue(0.5)
         self.crossfade.setSuffix(" s")
-        form.addRow(self.crossfade_on)
-        form.addRow("Fade length", self.crossfade)
-        layout.addWidget(join_box)
+        form.addRow(_label(""), self.crossfade_on)
+        form.addRow(_label("Fade length"), self.crossfade)
+        body.addWidget(box)
+        body.addStretch()
 
-        # Summary + export
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(content)
+        # Never narrower than the settings themselves, so nothing gets clipped on the right.
+        scroll.setMinimumWidth(content.minimumSizeHint().width() + scroll.verticalScrollBar().sizeHint().width())
+
+        # Pinned footer: summary, export, progress
+        footer = QFrame()
+        footer.setObjectName("exportFooter")
+        footer.setStyleSheet("#exportFooter { border-top: 1px solid palette(mid); }")
+        foot = QVBoxLayout(footer)
+        foot.setContentsMargins(8, 10, 12, 8)
+        foot.setSpacing(8)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         self.summary.setTextFormat(Qt.RichText)
-        layout.addWidget(self.summary)
+        self.summary.setMinimumHeight(self.summary.fontMetrics().lineSpacing() * 2)
         self.export_btn = QPushButton("Export…")
         self.export_btn.setMinimumHeight(38)
         self.export_btn.setStyleSheet("font-weight: bold; font-size: 11pt;")
-        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn = QPushButton("Cancel export")
+        self.cancel_btn.setMinimumHeight(38)
         self.cancel_btn.hide()
         self.progress = QProgressBar()
         self.progress.setRange(0, 1000)
+        self.progress.setTextVisible(True)
         self.progress.hide()
         self.status = QLabel()
         self.status.setWordWrap(True)
-        layout.addWidget(self.export_btn)
-        layout.addWidget(self.cancel_btn)
-        layout.addWidget(self.progress)
-        layout.addWidget(self.status)
-        layout.addStretch()
+        self.status.setStyleSheet("color: palette(placeholder-text);")
+        foot.addWidget(self.summary)
+        foot.addWidget(self.progress)
+        foot.addWidget(self.export_btn)
+        foot.addWidget(self.cancel_btn)
+        foot.addWidget(self.status)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(scroll, 1)
+        outer.addWidget(footer)
 
         self.export_btn.clicked.connect(self.exportRequested)
         self.cancel_btn.clicked.connect(self.cancelRequested)
         self.codec.currentIndexChanged.connect(self._fill_encoders)
-        self.mode.currentIndexChanged.connect(lambda i: self.pages.setCurrentIndex(i))
         self.volume.valueChanged.connect(lambda v: self.volume_label.setText(f"{v}%"))
         for w in (self.format, self.encoder, self.resolution, self.speed, self.mode, self.preset,
-                  self.audio_bitrate):
+                  self.rate, self.audio_bitrate):
             w.currentIndexChanged.connect(self._changed)
         self.fps.currentTextChanged.connect(self._changed)
         for w in (self.size_mb, self.crossfade, self.quality, self.bitrate, self.volume):
             w.valueChanged.connect(self._changed)
-        for w in (self.two_pass, self.mute, self.crossfade_on, self.rate_quality):
+        for w in (self.two_pass, self.mute, self.crossfade_on):
             w.toggled.connect(self._changed)
         self._changed()
 
@@ -252,13 +281,20 @@ class ExportPanel(QWidget):
 
     def _changed(self, *_):
         enc = ENCODERS.get(self.encoder.currentData() or "")
-        self.two_pass.setEnabled(enc is not None and enc.family in TWO_PASS_FAMILIES)
-        self.quality.setEnabled(self.rate_quality.isChecked())
-        self.bitrate.setEnabled(not self.rate_quality.isChecked())
+        mode = self.mode.currentData()
+        manual_bitrate = self.rate.currentData() == "bitrate"
+        f = self.comp_form
+        f.setRowVisible(self.preset, mode == "preset")
+        f.setRowVisible(self.size_mb, mode == "size")
+        f.setRowVisible(self.size_shortcuts, mode == "size")
+        f.setRowVisible(self.two_pass, mode == "size" and enc is not None and enc.family in TWO_PASS_FAMILIES)
+        f.setRowVisible(self.rate, mode == "manual")
+        f.setRowVisible(self.quality, mode == "manual" and not manual_bitrate)
+        f.setRowVisible(self.bitrate, mode == "manual" and manual_bitrate)
         self.volume.setEnabled(not self.mute.isChecked())
         self.audio_bitrate.setEnabled(not self.mute.isChecked())
         self.crossfade.setEnabled(self.crossfade_on.isChecked())
-        self.export_btn.setEnabled(enc is not None and not self.progress.isVisible())
+        self.export_btn.setEnabled(enc is not None and not self._busy)
         self.changed.emit()
 
     @property
@@ -272,7 +308,7 @@ class ExportPanel(QWidget):
             preset=self.preset.currentData(),
             target_size_mb=self.size_mb.value(),
             two_pass=self.two_pass.isChecked(),
-            manual_rate="quality" if self.rate_quality.isChecked() else "bitrate",
+            manual_rate=self.rate.currentData(),
             manual_quality=self.quality.value(),
             manual_bitrate_k=self.bitrate.value(),
             speed=self.speed.currentData(),
@@ -291,7 +327,6 @@ class ExportPanel(QWidget):
         q.setValue("fps", self.fps.currentText())
         q.setValue("size_mb", self.size_mb.value())
         q.setValue("two_pass", self.two_pass.isChecked())
-        q.setValue("manual_bitrate", self.rate_bitrate.isChecked())
         q.setValue("quality", self.quality.value())
         q.setValue("bitrate", self.bitrate.value())
         q.setValue("mute", self.mute.isChecked())
@@ -315,8 +350,6 @@ class ExportPanel(QWidget):
             self.fps.setCurrentText(str(q.value("fps", FPS_CHOICES[0])))
             self.size_mb.setValue(float(q.value("size_mb", 25)))
             self.two_pass.setChecked(q.value("two_pass", True, type=bool))
-            (self.rate_bitrate if q.value("manual_bitrate", False, type=bool)
-             else self.rate_quality).setChecked(True)
             self.quality.setValue(int(q.value("quality", 23)))
             self.bitrate.setValue(int(q.value("bitrate", 4000)))
             self.mute.setChecked(q.value("mute", False, type=bool))
@@ -329,11 +362,12 @@ class ExportPanel(QWidget):
     def _combos(self) -> dict[str, QComboBox]:
         return {"format": self.format, "codec": self.codec, "encoder": self.encoder,
                 "resolution": self.resolution, "speed": self.speed, "mode": self.mode,
-                "preset": self.preset, "audio_bitrate": self.audio_bitrate}
+                "preset": self.preset, "rate": self.rate, "audio_bitrate": self.audio_bitrate}
 
     # -- export progress ----------------------------------------------------------------------
 
     def set_busy(self, busy: bool):
+        self._busy = busy
         self.progress.setVisible(busy)
         self.cancel_btn.setVisible(busy)
         self.export_btn.setVisible(not busy)

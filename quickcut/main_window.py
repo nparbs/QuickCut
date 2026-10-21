@@ -12,7 +12,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QLabel,
-    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSplitter,
+    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSplitter,
     QStyle, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -222,17 +222,13 @@ class MainWindow(QMainWindow):
         self.panel.changed.connect(self._refresh_summary)
         self.panel.exportRequested.connect(self.export)
         self.panel.cancelRequested.connect(self.cancel_export)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setWidget(self.panel)
-        scroll.setMinimumWidth(340)
-        splitter.addWidget(scroll)
+        splitter.addWidget(self.panel)
 
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setSizes([280, 760, 360])
+        splitter.setSizes([280, 750, 370])
+        splitter.setCollapsible(2, False)
 
         menu = self.menuBar().addMenu("&File")
         for text, key, slot in (("&Add videos…", QKeySequence.Open, self.open_files),
