@@ -44,7 +44,7 @@ jobs:
         shell: pwsh
         run: python packaging/build.py --ffmpeg-dir "$env:FFMPEG_BIN"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: QuickCut-windows-x64
           path: dist/*.zip
