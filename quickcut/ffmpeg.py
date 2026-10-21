@@ -115,6 +115,7 @@ def probe(tools: Tools, path: str) -> MediaInfo:
     if width <= 0 or height <= 0:
         raise FFmpegError("Could not determine the video's resolution")
 
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
     return MediaInfo(
         path=path,
         duration=duration,
@@ -122,9 +123,11 @@ def probe(tools: Tools, path: str) -> MediaInfo:
         height=height,
         fps=rate[0],
         fps_value=rate[1],
-        has_audio=any(s.get("codec_type") == "audio" for s in streams),
+        has_audio=audio is not None,
         video_codec=video.get("codec_name", "?"),
         size_bytes=int(fmt.get("size", 0) or 0),
+        audio_codec=audio.get("codec_name", "") if audio else "",
+        hdr=video.get("color_transfer") in ("smpte2084", "arib-std-b67"),
     )
 
 
@@ -141,10 +144,11 @@ class Encoder:
 
 
 _GPU_LABELS = {"nvenc": "NVIDIA GPU", "amf": "AMD GPU", "qsv": "Intel GPU (Quick Sync)"}
-_CPU = {"h264": ("libx264", "x264"), "hevc": ("libx265", "x265"), "av1": ("libsvtav1", "svtav1")}
+_CPU = {"h264": ("libx264", "x264"), "hevc": ("libx265", "x265"), "av1": ("libsvtav1", "svtav1"),
+        "vp9": ("libvpx-vp9", "vpx")}
 
 ENCODERS: dict[str, Encoder] = {}
-for _codec in ("h264", "hevc", "av1"):
+for _codec in ("h264", "hevc", "av1", "vp9"):
     for _family, _label in _GPU_LABELS.items():
         _name = f"{_codec}_{_family}"
         ENCODERS[_name] = Encoder(_name, _codec, _family, f"{_label} ({_name})")
@@ -155,6 +159,16 @@ CODEC_LABELS = {
     "h264": "H.264 (plays everywhere)",
     "hevc": "H.265 / HEVC (smaller files)",
     "av1": "AV1 (smallest, newer devices)",
+    "vp9": "VP9 (WebM, for web pages)",
+}
+
+CODEC_TIPS = {
+    "h264": "The safe choice. Plays on every phone, browser, TV and editor.",
+    "hevc": "About 30-40% smaller than H.264 at the same quality. Plays on most devices from "
+            "the last few years; some older PCs and browsers can't play it.",
+    "av1": "The smallest files at the same quality, but encoding is slower without a recent GPU "
+           "and older devices can't play it.",
+    "vp9": "Open format used by YouTube and web pages. Similar size to HEVC. Needed for WebM files.",
 }
 
 

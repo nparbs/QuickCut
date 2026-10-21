@@ -4,12 +4,22 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import time
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
 
 from .command import ExportPlan, retry_plan_if_too_big
 
 MAX_SIZE_RETRIES = 2
+
+
+def fmt_eta(seconds: float) -> str:
+    seconds = int(seconds + 0.5)
+    if seconds >= 3600:
+        return f"{seconds // 3600}h {seconds % 3600 // 60:02d}m left"
+    if seconds >= 60:
+        return f"{seconds // 60}m {seconds % 60:02d}s left"
+    return f"{seconds}s left"
 
 
 class ExportRunner(QObject):
@@ -26,21 +36,36 @@ class ExportRunner(QObject):
         self._buffer = ""
         self._workdir = tempfile.mkdtemp(prefix="quickcut_")
         self._proc: QProcess | None = None
+        self._started = 0.0
         self.warning = ""
 
     def start(self):
-        self._pass = 0
-        self._run_pass()
+        self._started = time.monotonic()
+        self._start_plan()
 
     def cancel(self):
         self._cancelled = True
         if self._proc and self._proc.state() != QProcess.NotRunning:
             self._proc.kill()
+        elif self._proc is None:
+            self._finish(False, "Export cancelled.")
+
+    def _start_plan(self):
+        for name, text in self.plan.files.items():
+            with open(os.path.join(self._workdir, name), "w", encoding="utf-8") as f:
+                f.write(text)
+        self._pass = 0
+        self._run_pass()
+
+    def _weights(self) -> list[float]:
+        durations = self.plan.pass_durations or [self.plan.duration] * len(self.plan.passes)
+        total = sum(durations) or 1.0
+        return [d / total for d in durations]
 
     def _status(self) -> str:
         parts = []
         if len(self.plan.passes) > 1:
-            parts.append(f"Pass {self._pass + 1} of {len(self.plan.passes)}")
+            parts.append(f"Step {self._pass + 1} of {len(self.plan.passes)}")
         if self._retries:
             parts.append(f"retry {self._retries} (file was over the size limit)")
         return " · ".join(parts)
@@ -61,8 +86,20 @@ class ExportRunner(QObject):
         proc.finished.connect(self._pass_finished)
         proc.errorOccurred.connect(self._process_error)
         self._proc = proc
-        self.progress.emit(self._pass / len(self.plan.passes), self._status())
+        self._emit(0.0, "")
         proc.start()
+
+    def _emit(self, pass_fraction: float, speed: str):
+        weights = self._weights()
+        overall = sum(weights[:self._pass]) + weights[self._pass] * pass_fraction
+        overall = min(1.0, max(0.0, overall))
+        parts = [self._status()]
+        if speed:
+            parts.append(f"{speed} speed")
+        elapsed = time.monotonic() - self._started
+        if overall > 0.03 and elapsed > 2 and not self._retries:
+            parts.append(fmt_eta(elapsed / overall - elapsed))
+        self.progress.emit(overall, " · ".join(p for p in parts if p))
 
     def _read_stdout(self):
         self._buffer += bytes(self._proc.readAllStandardOutput()).decode("utf-8", "replace")
@@ -75,11 +112,9 @@ class ExportRunner(QObject):
                 done = int(value) / 1_000_000
             elif key == "speed" and value not in ("N/A", ""):
                 speed = value
-        if done is not None and self.plan.duration > 0:
-            frac = min(1.0, max(0.0, done / self.plan.duration))
-            overall = (self._pass + frac) / len(self.plan.passes)
-            status = " · ".join(p for p in (self._status(), f"{speed} speed" if speed else "") if p)
-            self.progress.emit(overall, status)
+        durations = self.plan.pass_durations or [self.plan.duration] * len(self.plan.passes)
+        if done is not None and durations[self._pass] > 0:
+            self._emit(min(1.0, max(0.0, done / durations[self._pass])), speed)
 
     def _read_stderr(self):
         self._stderr += bytes(self._proc.readAllStandardError()).decode("utf-8", "replace")
@@ -95,6 +130,11 @@ class ExportRunner(QObject):
             self._finish(False, "Export cancelled.")
             return
         if code != 0 or status != QProcess.NormalExit:
+            if self.plan.fallback is not None:
+                # Hardware decoding can fail on unusual files; redo everything in software.
+                self.plan = self.plan.fallback
+                self._start_plan()
+                return
             self._remove_output()
             message = self._stderr.strip() or f"ffmpeg exited with code {code}"
             self._finish(False, message[-2000:])
@@ -110,8 +150,7 @@ class ExportRunner(QObject):
             if self._retries < MAX_SIZE_RETRIES:
                 self._retries += 1
                 self.plan = retry
-                self._pass = 0
-                self._run_pass()
+                self._start_plan()
                 return
             self.warning = (f"The file is {size / 1048576:.2f} MB, over the "
                             f"{self.plan.target_bytes / 1048576:.2f} MB target. The encoder can't go lower "
