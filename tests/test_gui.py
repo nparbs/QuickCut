@@ -204,4 +204,37 @@ def test_single_instance_handoff(app, media):
     proc = subprocess.Popen([sys.executable, "-c", code], cwd=os.path.dirname(os.path.dirname(__file__)))
     wait_for(lambda: proc.poll() is not None and got, timeout=20)
     assert proc.returncode == 0 and got == [media["a"]]
-    server.server.close()
+    server.close()
+
+
+LAUNCHER = """
+import sys, time
+from PySide6.QtCore import QCoreApplication
+app = QCoreApplication(sys.argv)
+from quickcut.single_instance import become_primary
+server = become_primary([sys.argv[1]])
+if server is None:
+    print("handed-off", flush=True)
+    sys.exit(0)
+got = []
+server.filesReceived.connect(got.extend)
+end = time.time() + 6
+while time.time() < end:
+    app.processEvents()
+    time.sleep(0.02)
+print("primary", len(got), flush=True)
+server.close()
+"""
+
+
+def test_simultaneous_launches_open_one_window(app, tmp_path):
+    """Explorer starts one process per selected file at the same moment; only one may win."""
+    script = tmp_path / "launch.py"
+    script.write_text(LAUNCHER, encoding="utf-8")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, PYTHONPATH=root)
+    procs = [subprocess.Popen([sys.executable, str(script), f"file{i}.mp4"], stdout=subprocess.PIPE,
+                              text=True, env=env) for i in range(4)]
+    outputs = sorted(p.communicate(timeout=60)[0].strip() for p in procs)
+    # One window; the other three launches hand their files to it over the pipe.
+    assert outputs == ["handed-off"] * 3 + ["primary 3"], outputs

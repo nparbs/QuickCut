@@ -870,11 +870,16 @@ class MainWindow(QMainWindow):
         if self.project_path:
             self._set_dirty()
 
-    def _confirm_discard(self) -> bool:
+    def _confirm_discard(self, closing: bool = False) -> bool:
         if not self._dirty:
             return True
+        # Quick trim-and-export sessions without a project aren't nagged on close.
+        if closing and not self.project_path:
+            return True
+        question = ("Save changes to this project first?" if self.project_path else
+                    "Save these clips as a project first? Otherwise they'll be removed.")
         answer = QMessageBox.question(
-            self, "QuickCut", "Save changes to this project first?",
+            self, "QuickCut", question,
             QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Save)
         if answer == QMessageBox.Save:
             return self.save_project()
@@ -1359,7 +1364,7 @@ class MainWindow(QMainWindow):
             if answer != QMessageBox.Yes:
                 e.ignore()
                 return
-        if not self._confirm_discard():
+        if not self._confirm_discard(closing=True):
             e.ignore()
             return
         self.queue.cancel_all()

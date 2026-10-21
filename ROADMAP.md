@@ -50,7 +50,7 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 - [x] Splitter sizes and window layout remembered
 - [x] Plain-language tooltips for codecs, encoders and settings
 
-**Tests**: 70 automated tests (6 of them need AMD or Intel GPUs), including end-to-end exports for every feature, and GUI tests that drive the real window off-screen.
+**Tests**: 71 automated tests (6 of them need AMD or Intel GPUs), including end-to-end exports for every feature, and GUI tests that drive the real window off-screen.
 
 ### v0.1.0: first release
 - [x] Trimming with preview, timeline handles and keyboard shortcuts

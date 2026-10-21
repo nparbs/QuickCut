@@ -11,7 +11,7 @@ from . import __version__
 from .config import app_settings
 from .ffmpeg import find_tools
 from .main_window import MainWindow
-from .single_instance import InstanceServer, send_to_running
+from .single_instance import become_primary
 from .theme import apply_theme
 
 ICON = Path(__file__).with_name("resources") / "icon.png"
@@ -42,9 +42,9 @@ def main() -> int:
     files = sys.argv[1:]
 
     # A second launch (e.g. "Open with QuickCut" on several files) hands its files to the first window.
-    if send_to_running(files):
+    server = become_primary(files)
+    if server is None:
         return 0
-    server = InstanceServer()
 
     settings = app_settings()
     apply_theme(app, settings.value("view/theme", "system"))
@@ -57,6 +57,7 @@ def main() -> int:
             "QuickCut couldn't find ffmpeg and ffprobe.\n\n"
             "Install FFmpeg (for example: winget install Gyan.FFmpeg), then restart QuickCut. "
             "You can also put an 'ffmpeg' folder next to QuickCut or set QUICKCUT_FFMPEG_DIR."))
+        server.close()
         return 1
 
     window = MainWindow(tools)
@@ -72,7 +73,7 @@ def main() -> int:
     window.shutdown()
     window.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
-    server.server.close()
+    server.close()
     return code
 
 
