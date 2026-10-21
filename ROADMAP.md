@@ -1,127 +1,104 @@
 # QuickCut Roadmap
 
-What's been built so far, what's known to be missing, and ideas for where QuickCut could go next.
+What's been built so far, what's known to be missing, and ideas for where QuickCut could go next. See [CHANGELOG.md](CHANGELOG.md) for release-by-release details.
 
 ## Done
 
-### v0.1.0: first release
+### v0.2.0: distribution, editing, export and usability
 
-**Trimming and preview**
-- [x] Add videos with the Add button, Ctrl+O, drag and drop (files or whole folders), or command-line arguments
-- [x] Preview player with play/pause, frame stepping and 1-second stepping
-- [x] Timeline bar with draggable start/end handles and a playhead
-- [x] Exact start/end entry, plus "set start/end here" at the playhead (I / O keys)
-- [x] Loop the trimmed selection during preview
-- [x] Each clip keeps its own trim
+**Distribution**
+- [x] Standalone Windows build (PyInstaller) with FFmpeg bundled; no Python install needed
+- [x] The build script checks that the packaged app starts and uses its bundled FFmpeg
+- [x] GitHub Actions: tests on every push; on a `v*` tag it builds the zip and publishes a GitHub Release with notes from the changelog
+- [x] "Open with QuickCut" in the Explorer right-click menu (per user, toggled from the Tools menu)
+- [x] Single window: opening more files while QuickCut runs adds them to the open window
+- [x] Check for updates now, or on startup (opt-in)
 
-**Joining clips**
-- [x] Clips join in list order; reorder by dragging or with the arrow buttons
-- [x] Hard cuts or a crossfade of video and audio, with adjustable length
-- [x] Crossfade automatically shortened to fit the shortest clip
-- [x] Clips with different resolutions, frame rates or no audio join cleanly (black bars, frame-rate conversion, silence)
-
-**Output settings**
-- [x] MP4, MKV and MOV containers
-- [x] H.264, H.265/HEVC and AV1
-- [x] GPU encoding (NVIDIA NVENC, AMD AMF, Intel Quick Sync), detected at startup by a test encode, with CPU fallback
-- [x] Resolution presets from 4K to 240p, or same as source
-- [x] Frame rate presets or any typed value
-- [x] Encoder speed setting (slower and smaller, balanced, faster)
-- [x] Audio: remove, volume 0–300 %, bitrate choice
-
-**Compression**
-- [x] Quality presets (High / Balanced / Small / Smallest), tuned per codec
-- [x] Target file size with quick buttons (8, 10, 25, 50, 100, 500 MB)
-- [x] Two-pass encoding for CPU encoders in size mode
-- [x] Automatic re-encode at a lower bitrate if a file comes out over the size limit (up to 2 retries), with a warning if the target can't be reached
-- [x] Manual mode: constant quality (CRF/CQ) or fixed bitrate
-- [x] Live summary of output resolution, length and estimated size, with a warning when the bitrate is too low for the resolution
+**Editing**
+- [x] Split clip at playhead
+- [x] Duplicate clip
+- [x] Crop / framing with aspect presets (16:9, 9:16, 1:1, 4:5, 4:3, 21:9) and black bars, crop to fill, or blurred background
+- [x] Rotate / flip, shown live in the player
+- [x] Speed change (0.25×–4×) with pitch-corrected audio
+- [x] Fade in / fade out from black
+- [x] 21 transitions (crossfade, dissolve, dip to black/white, wipes, slides, circle, radial, zoom, pixelate…)
+- [x] Background music with volume, looping and an automatic end fade
+- [x] Text overlay and logo watermark, with position, size, colour, box, opacity and timing
+- [x] Reverse a clip
 
 **Export**
-- [x] Progress bar with pass count and encode speed
-- [x] Cancel; a partial output file is cleaned up
-- [x] "Show in folder" and "Play" when done
-- [x] Guard against overwriting one of the input clips
+- [x] Platform presets: Discord, Discord Nitro, WhatsApp, email, YouTube, Shorts/Reels/TikTok, Instagram, X, GIF, MP3
+- [x] Lossless quick trim/join (stream copy), with checks for clips that can't be joined this way
+- [x] GIF and animated WebP export with palette optimization
+- [x] Audio-only export (MP3 / M4A / WAV)
+- [x] Batch: export each clip separately
+- [x] Export queue that runs while you keep editing
+- [x] Loudness normalization (−16 LUFS)
+- [x] HDR to SDR tone mapping
+- [x] Auto-lower the resolution when a size target is too small for it
+- [x] Estimated time remaining
+- [x] VP9 / WebM output with Opus audio and two-pass size targets
+- [x] Hardware-accelerated decoding, with automatic software fallback
 
-**App**
-- [x] Dark theme
-- [x] Remembers export settings, folders and window size between sessions
-- [x] Finds FFmpeg via `QUICKCUT_FFMPEG_DIR`, a bundled `ffmpeg` folder, or `PATH`
-- [x] Keyboard shortcuts (listed under Help → Keyboard shortcuts)
+**Usability**
+- [x] Preview the whole edit (quick low-res render including transitions, text and music)
+- [x] Thumbnails in the clip list; filmstrip and audio waveform on the timeline
+- [x] Undo / redo
+- [x] Save and open projects (`.qcut`), with relative paths so moved folders still open
+- [x] Recent projects
+- [x] Dark, light, or follow-Windows theme
+- [x] Splitter sizes and window layout remembered
+- [x] Plain-language tooltips for codecs, encoders and settings
 
-**Tests**
-- [x] End-to-end tests that generate synthetic clips and run real FFmpeg exports: trim, concat, crossfade, fps/resolution, audio, two-pass size targets, and every encoder available on the machine
+**Tests**: 70 automated tests (6 of them need AMD or Intel GPUs), including end-to-end exports for every feature, and GUI tests that drive the real window off-screen.
 
-### Fixes and polish since release
-- [x] **Crossfade colour format bug.** FFmpeg's `xfade` filter output 4:4:4 video. NVIDIA AV1 rejected it, and NVIDIA H.264 encoded a much heavier stream that overshot size targets by about 25 %. Output is now forced to standard 4:2:0, with a regression test.
-- [x] **SVT-AV1 overshoot** on short clips reduced by capping its overshoot.
-- [x] **Settings panel layout**
-  - Export button and summary pinned to the bottom
-  - Labels aligned across all groups
-  - Rows shown only for the current compression mode
-  - Simpler manual-mode controls
-  - Two-pass shown only when it applies
+### v0.1.0: first release
+- [x] Trimming with preview, timeline handles and keyboard shortcuts
+- [x] Joining clips with hard cuts or crossfades; mixed resolutions, frame rates and audio-less clips
+- [x] Resolution and frame-rate changes
+- [x] Compression by quality preset, target file size (two-pass, automatic retry) or manual settings
+- [x] H.264, HEVC and AV1 on CPU, NVIDIA, AMD or Intel, detected at startup
+- [x] Audio remove / volume / bitrate; MP4, MKV and MOV
+- [x] Settings panel layout fix: pinned Export button, aligned labels, no gaps
 
 ## Known limitations
 
-- The output's shape, and its frame rate when set to *Same as source*, come from the **first** clip in the list.
-- **HDR** (10-bit) sources are converted to 8-bit without tone mapping, so colours can look washed out.
 - **Variable frame rate** sources (such as phone recordings) are converted to a constant frame rate.
-- The **preview** uses Qt Multimedia, which can't play every format that FFmpeg can export from.
-- Very small size targets at high resolutions can be **impossible to reach**. QuickCut warns but doesn't lower the resolution for you.
-- The preview plays **one clip at a time**; there's no full preview of the joined result before exporting.
-- Tested mainly on **Windows** with an NVIDIA GPU. AMD and Intel GPU encoders, macOS and Linux haven't been tested on real hardware.
+- **HDR** is always converted to SDR; there's no option to keep 10-bit HDR output yet.
+- Transitions use **one style and length** for every cut; you can't choose per cut.
+- Crop always keeps the **centre** of the frame; you can't move the crop area.
+- The live player doesn't show **reverse, framing, text, music or transitions**; use Preview edit for those.
+- Animated **WebP** files can't be opened in QuickCut itself (FFmpeg can't decode them).
+- **No re-encode** mode cuts on keyframes, so cuts can be off by up to a few seconds.
+- Tested mainly on **Windows** with an NVIDIA GPU. AMD and Intel GPU encoders, macOS and Linux are untested on real hardware, and there's no macOS/Linux download yet.
+- The Windows download isn't **code-signed**, so SmartScreen may warn the first time you run it.
 
 ## Future ideas
 
-Roughly ordered by value within each section.
-
-### Distribution
-- [ ] **Standalone Windows build** (PyInstaller) with FFmpeg bundled, so no Python install is needed
-- [ ] **GitHub Releases** with a downloadable zip/installer, built automatically by GitHub Actions
-- [ ] **"Open with QuickCut"** in the Explorer right-click menu for video files
-- [ ] Check for updates on startup (opt-in)
-
 ### Editing
-- [ ] **Split clip at playhead**, to cut out the middle of a video or keep several parts of one file
-- [ ] **Duplicate clip**, to reuse one source with different trims
-- [ ] **Crop**, with aspect presets (16:9, 9:16 for Shorts/TikTok, 1:1, 4:5)
-- [ ] **Rotate / flip**
-- [ ] **Speed change** (0.25×–4×) for slow motion or time-lapse, with pitch-corrected audio
-- [ ] **Fade in / fade out** from black at the start and end
-- [ ] **More transitions**: wipe, slide, dissolve, zoom (all available in `xfade`)
-- [ ] **Background music** track with its own volume and fade
-- [ ] **Text overlay / watermark** (title, caption, logo image)
-- [ ] Reverse a clip
+- [ ] Per-cut transition style and length
+- [ ] Drag to position the crop area; per-clip crop
+- [ ] Per-clip volume and mute
+- [ ] Freeze frame and still-image clips (photos in a slideshow)
+- [ ] Subtitles: burn in `.srt` files
+- [ ] Multiple text overlays, each with its own timing
+- [ ] Speed ramps and a smoother reverse for long clips
 
 ### Export
-- [ ] **Platform presets**: Discord (10 MB), WhatsApp, YouTube, X/Twitter, Instagram, each setting size limit, resolution and codec in one click
-- [ ] **Lossless quick trim**: stream copy with no re-encode (instant, but cuts land on keyframes)
-- [ ] **GIF and animated WebP** export with palette optimization
-- [ ] **Audio-only export** (MP3 / M4A / WAV)
-- [ ] **Batch mode**: apply the same settings to many files, exporting each separately
-- [ ] **Export queue**: line up several exports and let them run
-- [ ] **Audio normalization** (loudness to a standard level)
-- [ ] **HDR tone mapping** to SDR, or keep 10-bit HDR output for HEVC/AV1
-- [ ] Auto-lower the resolution when a size target is unreachable
-- [ ] Estimated time remaining during export
-- [ ] VP9 / WebM output
-- [ ] Hardware-accelerated decoding for faster exports of 4K sources
+- [ ] Keep 10-bit HDR when exporting to HEVC or AV1
+- [ ] Save your own export presets
+- [ ] Choose which audio track to use for multi-track sources
+- [ ] Optional variable frame rate passthrough
 
 ### Usability
-- [ ] **Preview the whole timeline**, with transitions, before exporting
-- [ ] **Thumbnails** in the clip list and along the timeline bar
-- [ ] **Audio waveform** under the trim bar, for cutting on sound
-- [ ] **Undo / redo**
-- [ ] **Save and open projects** (clip list, trims and settings as a `.json` file)
-- [ ] Recent files / recent projects
-- [ ] Light theme option, and following the Windows theme
-- [ ] Remember the splitter panel sizes
-- [ ] Tooltips that explain codec/encoder trade-offs in plain language
+- [ ] Live preview of framing and text in the player
+- [ ] Timeline view with clip widths proportional to length
+- [ ] Autosave and crash recovery for projects
+- [ ] Zoomable timeline for precise trims on long videos
 
-### Quality and maintenance
-- [ ] **CI on GitHub Actions** running the test suite (with FFmpeg installed) on every push
-- [ ] **GUI tests** with `pytest-qt`: trimming, reordering, settings persistence
-- [ ] Test AMD/Intel GPU encoders and macOS/Linux on real hardware
+### Distribution and maintenance
+- [ ] Installer and `winget` package
+- [ ] Code-signed Windows builds
+- [ ] macOS and Linux builds
+- [ ] Packaging metadata (`pyproject.toml`) for `pip install`
 - [ ] Optional log file of FFmpeg commands and errors, for bug reports
-- [ ] Packaging metadata (`pyproject.toml`) so it can be installed with `pip install .`

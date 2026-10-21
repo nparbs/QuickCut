@@ -1,34 +1,55 @@
+import json
+import os
 import sys
+from pathlib import Path
 
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtCore import QCoreApplication, QEvent, QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from . import __version__
+from .config import app_settings
 from .ffmpeg import find_tools
 from .main_window import MainWindow
+from .single_instance import InstanceServer, send_to_running
+from .theme import apply_theme
+
+ICON = Path(__file__).with_name("resources") / "icon.png"
 
 
-def dark_palette() -> QPalette:
-    p = QPalette()
-    colors = {
-        QPalette.Window: "#202124", QPalette.WindowText: "#e8eaed", QPalette.Base: "#2b2c30",
-        QPalette.AlternateBase: "#323338", QPalette.ToolTipBase: "#2b2c30",
-        QPalette.ToolTipText: "#e8eaed", QPalette.Text: "#e8eaed", QPalette.Button: "#303135",
-        QPalette.ButtonText: "#e8eaed", QPalette.BrightText: "#ffffff", QPalette.Highlight: "#c98f12",
-        QPalette.HighlightedText: "#000000", QPalette.Link: "#f5b82e",
-        QPalette.PlaceholderText: "#9aa0a6",
-    }
-    for role, color in colors.items():
-        p.setColor(role, QColor(color))
-    for role in (QPalette.Text, QPalette.ButtonText, QPalette.WindowText):
-        p.setColor(QPalette.Disabled, role, QColor("#6f7378"))
-    return p
+def _smoke_test(window: MainWindow, result_path: str):
+    """QUICKCUT_SMOKE_TEST=<file>: once encoders are detected, write what was found and quit.
+    Lets the build check that a packaged copy starts and finds its bundled FFmpeg."""
+    def check():
+        if window.panel.encoder.count() == 0:
+            QTimer.singleShot(200, check)
+            return
+        Path(result_path).write_text(json.dumps({
+            "version": __version__, "ffmpeg": window.tools.ffmpeg,
+            "encoders": [window.panel.encoder.itemData(i) for i in range(window.panel.encoder.count())],
+        }), encoding="utf-8")
+        window._dirty = False
+        window.close()
+    QTimer.singleShot(200, check)
 
 
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("QuickCut")
+    app.setOrganizationName("QuickCut")
     app.setStyle("Fusion")
-    app.setPalette(dark_palette())
+    app.setWindowIcon(QIcon(str(ICON)))
+    files = sys.argv[1:]
+
+    # A second launch (e.g. "Open with QuickCut" on several files) hands its files to the first window.
+    if send_to_running(files):
+        return 0
+    server = InstanceServer()
+
+    settings = app_settings()
+    apply_theme(app, settings.value("view/theme", "system"))
+    app.styleHints().colorSchemeChanged.connect(
+        lambda _: apply_theme(app, "system") if settings.value("view/theme", "system") == "system" else None)
 
     tools = find_tools()
     if tools is None:
@@ -39,10 +60,20 @@ def main() -> int:
         return 1
 
     window = MainWindow(tools)
+    server.filesReceived.connect(lambda paths: (window.add_files(paths) if paths else None,
+                                                window.bring_to_front()))
     window.show()
-    if len(sys.argv) > 1:
-        window.add_files(sys.argv[1:])
-    return app.exec()
+    if files:
+        window.add_files(files)
+    if os.environ.get("QUICKCUT_SMOKE_TEST"):
+        _smoke_test(window, os.environ["QUICKCUT_SMOKE_TEST"])
+    code = app.exec()
+    # Tear down media and worker threads while Qt is still alive, or the process hangs on exit.
+    window.shutdown()
+    window.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    server.server.close()
+    return code
 
 
 if __name__ == "__main__":
