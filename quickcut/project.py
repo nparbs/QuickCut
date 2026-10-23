@@ -10,7 +10,7 @@ from .models import Clip
 
 PROJECT_EXT = ".qcut"
 FORMAT_VERSION = 1
-CLIP_FIELDS = ("start", "end", "speed", "rotate", "hflip", "vflip", "reverse")
+CLIP_FIELDS = ("start", "end", "speed", "rotate", "hflip", "vflip", "reverse", "volume", "muted")
 
 
 def clip_to_dict(clip: Clip, project_dir: Path) -> dict:

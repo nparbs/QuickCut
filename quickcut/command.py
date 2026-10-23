@@ -325,12 +325,14 @@ def _clip_video(i: int, c: Clip, s: ExportSettings, w: int, h: int, fps: str) ->
 
 def _clip_audio(i: int, c: Clip) -> str:
     length = f"{c.out_length:.3f}"
-    if not c.info.has_audio:
+    if not c.info.has_audio or c.muted or c.volume <= 0:
         return f"anullsrc=r={SAMPLE_RATE}:cl=stereo,atrim=duration={length},{AUDIO_FORMAT}[a{i}]"
     f = [f"aresample={SAMPLE_RATE}", AUDIO_FORMAT, "asetpts=PTS-STARTPTS"]
     if c.reverse:
         f.append("areverse")
     f += [f"atempo={t:g}" for t in _atempo(c.speed)]
+    if c.volume != 1.0:
+        f.append(f"volume={c.volume:.2f}")
     f += ["apad", f"atrim=duration={length}"]
     return f"[{i}:a:0]{','.join(f)}[a{i}]"
 
@@ -443,6 +445,8 @@ def copy_mode_problems(clips: list[Clip], s: ExportSettings) -> tuple[list[str],
                           "without re-encoding.")
     if any(c.has_effects for c in clips):
         warnings.append("Speed, rotation, flips and reverse are ignored.")
+    if any(c.has_audio_changes for c in clips):
+        warnings.append("Per-clip volume and mute are ignored.")
     if (s.height or s.fps or s.aspect or s.overlays or s.music or s.fade_in or s.fade_out
             or s.crossfade or s.normalize or s.volume != 1.0):
         warnings.append("Resolution, frame rate, framing, text, music, fades, transitions and "

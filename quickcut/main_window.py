@@ -16,7 +16,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDockWidget, QDoubleSpinBox,
     QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
-    QProgressDialog, QPushButton, QSplitter, QStyle, QToolButton, QVBoxLayout, QWidget,
+    QProgressDialog, QPushButton, QSpinBox, QSplitter, QStyle, QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import __version__, shell_integration
@@ -308,11 +308,27 @@ class MainWindow(QMainWindow):
         self.reverse.toggled.connect(lambda on: self._set_effect("reverse", on))
         for w in (rot_left, rot_right, self.hflip, self.vflip, self.reverse):
             row.addWidget(w)
+        row.addSpacing(12)
+        row.addWidget(QLabel("Volume"))
+        self.clip_volume = QSpinBox()
+        self.clip_volume.setRange(0, 400)
+        self.clip_volume.setSingleStep(10)
+        self.clip_volume.setSuffix(" %")
+        self.clip_volume.setToolTip("Volume of this clip's own sound in the export. "
+                                    "The player previews up to 100 %.")
+        self.clip_volume.valueChanged.connect(self._clip_volume_changed)
+        row.addWidget(self.clip_volume)
+        self.clip_mute = QToolButton()
+        self.clip_mute.setText("🔇 Mute")
+        self.clip_mute.setCheckable(True)
+        self.clip_mute.setToolTip("Silence this clip's own sound (music still plays)")
+        self.clip_mute.toggled.connect(lambda on: self._set_effect("muted", on))
+        row.addWidget(self.clip_mute)
         row.addStretch()
         mv.addLayout(row)
         self.clip_controls = [self.trim, self.start_spin, self.end_spin, set_start, set_end, reset,
                               self.play_btn, self.speed, rot_left, rot_right, self.hflip, self.vflip,
-                              self.reverse, *self.step_buttons]
+                              self.reverse, self.clip_volume, self.clip_mute, *self.step_buttons]
         self.splitter.addWidget(mid)
 
         # Right: export settings
@@ -638,7 +654,8 @@ class MainWindow(QMainWindow):
         clip = self._clip()
         if clip is None:
             return
-        widgets = (self.start_spin, self.end_spin, self.speed, self.hflip, self.vflip, self.reverse)
+        widgets = (self.start_spin, self.end_spin, self.speed, self.hflip, self.vflip, self.reverse,
+                   self.clip_volume, self.clip_mute)
         for w in widgets:
             w.blockSignals(True)
         self.start_spin.setValue(clip.start)
@@ -651,8 +668,13 @@ class MainWindow(QMainWindow):
         self.hflip.setChecked(clip.hflip)
         self.vflip.setChecked(clip.vflip)
         self.reverse.setChecked(clip.reverse)
+        self.clip_volume.setValue(round(clip.volume * 100))
+        self.clip_volume.setEnabled(clip.info.has_audio and not clip.muted)
+        self.clip_mute.setChecked(clip.muted)
+        self.clip_mute.setEnabled(clip.info.has_audio)
         for w in widgets:
             w.blockSignals(False)
+        self.audio.setVolume(0.0 if clip.muted else min(1.0, clip.volume))
         self.player.setPlaybackRate(clip.speed)
         self.view.set_orientation(clip.rotate, clip.hflip, clip.vflip)
         extra = f" → {fmt_time(clip.out_length)} at {clip.speed:g}×" if clip.speed != 1 else ""
@@ -666,6 +688,13 @@ class MainWindow(QMainWindow):
             clip.speed = float(self.speed.currentData())
             self._sync_clip_widgets()
             self._changed("speed")
+
+    def _clip_volume_changed(self, percent: int):
+        clip = self._clip()
+        if clip:
+            clip.volume = percent / 100
+            self._sync_clip_widgets()
+            self._changed("volume")
 
     def _rotate(self, degrees: int):
         clip = self._clip()
@@ -786,8 +815,8 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _same(a: tuple | None, b: tuple | None) -> bool:
         def key(snap):
-            return tuple((cid, c.info.path, c.start, c.end, c.speed, c.rotate, c.hflip, c.vflip, c.reverse)
-                         for cid, c in snap[0])
+            return tuple((cid, c.info.path, c.start, c.end, c.speed, c.rotate, c.hflip, c.vflip, c.reverse,
+                          c.volume, c.muted) for cid, c in snap[0])
         return a is not None and b is not None and key(a) == key(b)
 
     def _changed(self, key: str):
@@ -799,7 +828,7 @@ class MainWindow(QMainWindow):
         if self._same(snap, self._committed):
             return
         now = time.monotonic()
-        coalesce = (key in ("trim", "speed") and key == self._last_key
+        coalesce = (key in ("trim", "speed", "volume") and key == self._last_key
                     and now - self._last_time < COALESCE_SECONDS)
         if not coalesce and self._committed is not None:
             self._undo.append(self._committed)
@@ -1016,6 +1045,10 @@ class MainWindow(QMainWindow):
                 tags.append("flipped")
             if c.reverse:
                 tags.append("reversed")
+            if c.muted and c.info.has_audio:
+                tags.append("muted")
+            elif c.volume != 1 and c.info.has_audio:
+                tags.append(f"vol {c.volume:.0%}")
             if c.info.hdr:
                 tags.append("HDR")
             if not c.info.has_audio:

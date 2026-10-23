@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Editing
+- Per-clip **volume** (0–400 %) and **mute**, under the player. The player previews them (up to 100 %), the clip list shows "muted" or "vol 50%", and projects save them. No re-encode mode ignores them and says so.
+
 ## [0.2.0] - 2026-10-21
 
 ### Download

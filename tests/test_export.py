@@ -176,6 +176,28 @@ def test_extreme_speed_chains_atempo(media):
     assert plan.passes[-1][plan.passes[-1].index("-filter_complex") + 1].count("atempo=2") == 2
 
 
+def _mean_volume(path, start, seconds):
+    r = subprocess.run([TOOLS.ffmpeg, "-v", "info", "-ss", str(start), "-t", str(seconds), "-i", path,
+                        "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True)
+    line = next(l for l in r.stderr.splitlines() if "mean_volume" in l)
+    return float(line.split("mean_volume:")[1].split("dB")[0])
+
+
+def test_per_clip_volume_and_mute(media):
+    loud, quiet, muted = _clips(media, "a", "a", "a")
+    quiet.volume, muted.muted = 0.25, True
+    for c in (loud, quiet, muted):
+        c.end = 2.0
+    info, plan = _export(media, [loud, quiet, muted], name="clipvol")
+    assert info.has_audio and abs(info.duration - 6) < 0.15
+    graph = plan.passes[-1][plan.passes[-1].index("-filter_complex") + 1]
+    assert "volume=0.25" in graph and graph.count("anullsrc") == 1
+    out = os.path.join(media["dir"], "clipvol.mp4")
+    a, b = _mean_volume(out, 0.3, 1.4), _mean_volume(out, 2.3, 1.4)
+    assert abs((a - b) - 12.0) < 1.5  # 25 % is about -12 dB
+    assert _mean_volume(out, 4.3, 1.4) < -80
+
+
 def test_rotate_and_flip(media):
     clip = Clip(probe(TOOLS, media["a"]), rotate=90, hflip=True)
     info, _ = _export(media, [clip], name="rotate")
@@ -296,6 +318,12 @@ def test_copy_mode(media):
     clips = [Clip(probe(TOOLS, keyed), start=0, end=3), Clip(probe(TOOLS, keyed), start=3)]
     info, plan = _export(media, clips, name="copy2", mode="copy")
     assert len(plan.passes) == 3 and abs(info.duration - 6) < 0.5
+
+
+def test_copy_mode_warns_about_clip_volume(media):
+    clip = Clip(probe(TOOLS, media["a"]), muted=True)
+    errors, warnings = copy_mode_problems([clip], ExportSettings(output="x.mp4", mode="copy"))
+    assert not errors and any("Per-clip volume" in w for w in warnings)
 
 
 def test_copy_mode_refuses_mismatched_clips(media):

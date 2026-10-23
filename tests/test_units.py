@@ -50,7 +50,7 @@ def test_project_relative_paths(tmp_path):
     video = tmp_path / "media" / "clip.mp4"
     video.parent.mkdir()
     video.write_bytes(b"")
-    clip = Clip(_info(str(video)), start=1, end=5, speed=2.0, rotate=270, reverse=True)
+    clip = Clip(_info(str(video)), start=1, end=5, speed=2.0, rotate=270, reverse=True, volume=1.5, muted=True)
     proj = tmp_path / "p.qcut"
     save_project(str(proj), [clip], {"aspect": "9:16"})
     data = json.loads(proj.read_text())
@@ -65,3 +65,10 @@ def test_project_relative_paths(tmp_path):
     fresh = Clip(_info(entries[0]["path"]))
     apply_clip_fields(fresh, entries[0])
     assert (fresh.start, fresh.end, fresh.speed, fresh.rotate, fresh.reverse) == (1, 5, 2.0, 270, True)
+    assert (fresh.volume, fresh.muted) == (1.5, True)
+
+    # Projects saved before per-clip volume existed load with the defaults.
+    old = {k: v for k, v in entries[0].items() if k not in ("volume", "muted")}
+    older = Clip(_info(entries[0]["path"]))
+    apply_clip_fields(older, old)
+    assert (older.volume, older.muted) == (1.0, False)

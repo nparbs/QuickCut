@@ -78,7 +78,7 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 ### Editing
 - [ ] Per-cut transition style and length
 - [ ] Drag to position the crop area; per-clip crop
-- [ ] Per-clip volume and mute
+- [x] Per-clip volume and mute
 - [ ] Freeze frame and still-image clips (photos in a slideshow)
 - [ ] Subtitles: burn in `.srt` files
 - [ ] Multiple text overlays, each with its own timing

@@ -24,7 +24,7 @@ To open videos straight from Explorer, turn on **Tools → Add “Open with Quic
 **Editing**
 - **Trim** each clip by dragging the yellow handles on the timeline (with filmstrip and waveform), typing times, or pressing **I** / **O** at the playhead.
 - **Split** at the playhead (S), **duplicate** (Ctrl+D), and drag clips to reorder them.
-- Per clip: **speed** 0.25×–4× (audio keeps its pitch), **rotate**, **mirror/flip**, **reverse**.
+- Per clip: **speed** 0.25×–4× (audio keeps its pitch), **rotate**, **mirror/flip**, **reverse**, **volume** (0–400 %) and **mute**.
 - **Framing**: 16:9, 9:16, 1:1, 4:5, 4:3 or 21:9, filled with black bars, cropped, or over a blurred copy of the video.
 - **21 transitions** between clips (crossfade, dip to black, wipes, slides…), plus **fade in / out**.
 - **Background music** with its own volume, looping and a fade at the end.

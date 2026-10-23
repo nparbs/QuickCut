@@ -33,6 +33,8 @@ class Clip:
     hflip: bool = False
     vflip: bool = False
     reverse: bool = False
+    volume: float = 1.0     # this clip's own audio, 0 - 4
+    muted: bool = False
 
     def __post_init__(self):
         if self.end <= 0:
@@ -56,6 +58,10 @@ class Clip:
     @property
     def has_effects(self) -> bool:
         return self.speed != 1.0 or self.rotate != 0 or self.hflip or self.vflip or self.reverse
+
+    @property
+    def has_audio_changes(self) -> bool:
+        return self.muted or self.volume != 1.0
 
 
 @dataclass

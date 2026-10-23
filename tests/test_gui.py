@@ -105,6 +105,25 @@ def test_trim_edits_coalesce_into_one_undo(win, media):
     assert win._ordered()[0].start == 0.0
 
 
+def test_clip_volume_and_mute(win, media):
+    win.add_files([media["a"], media["b"]])
+    win.list.setCurrentRow(0)
+    before = len(win._undo)
+    for v in (90, 80, 70, 60, 50):  # spinning the box is one undo step
+        win.clip_volume.setValue(v)
+    assert len(win._undo) == before + 1
+    assert win._ordered()[0].volume == 0.5 and win.audio.volume() == pytest.approx(0.5, abs=0.01)
+    win.clip_mute.setChecked(True)
+    assert win._ordered()[0].muted and not win.clip_volume.isEnabled() and win.audio.volume() == 0
+    assert "muted" in win.list.item(0).text()
+    win.undo()
+    assert not win._ordered()[0].muted and win._ordered()[0].volume == 0.5
+    assert "vol 50%" in win.list.item(0).text()
+    win.list.setCurrentRow(1)  # clip without sound
+    assert not win.clip_mute.isEnabled() and not win.clip_volume.isEnabled()
+    assert win.clip_volume.value() == 100
+
+
 def test_clip_effects_and_preset_export_with_overlays(win, media, monkeypatch):
     win.add_files([media["a"], media["b"]])
     win.list.setCurrentRow(0)
