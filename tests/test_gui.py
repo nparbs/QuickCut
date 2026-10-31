@@ -16,7 +16,7 @@ from PySide6.QtCore import QDeadlineTimer  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
-from quickcut import main_window as mw  # noqa: E402
+from quickcut import export_panel as ep, main_window as mw  # noqa: E402
 from quickcut.ffmpeg import find_tools, probe  # noqa: E402
 from quickcut.jobs import DONE  # noqa: E402
 
@@ -149,6 +149,119 @@ def test_clip_effects_and_preset_export_with_overlays(win, media, monkeypatch):
     info = probe(TOOLS, out)
     assert (info.width, info.height) == (1080, 1920)
     assert abs(info.duration - (2 + 3 - 0.5)) < 0.2   # 4 s at 2x, 3 s clip, 0.5 s transition
+
+
+def test_autosave_and_recovery(win, media, monkeypatch):
+    path = mw.autosave_path()
+    win.add_files([media["a"], media["b"]])
+    win.list.setCurrentRow(0)
+    win._set_trim(start=1.0, end=3.0)
+    assert win._dirty
+    win._autosave()
+    assert os.path.isfile(path)
+
+    # A crash leaves the file behind; declining throws it away.
+    second = mw.MainWindow(TOOLS)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.No))
+    second.offer_recovery()
+    assert not os.path.exists(path) and not second.clips
+    win._autosave()
+
+    # Accepting brings the clips and trim back as unsaved work, without touching recent projects.
+    recent = second._recent()
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    second.offer_recovery()
+    assert len(second.clips) == 2 and second._dirty and second.project_path is None
+    assert second._ordered()[0].start == 1.0 and second._ordered()[0].end == 3.0
+    assert second._recent() == recent
+    assert os.path.isfile(path)  # kept until the work is saved or the app closes cleanly
+
+    # A clean close removes it, so the next start asks nothing.
+    second._dirty = False
+    second.close()
+    assert not os.path.exists(path)
+    win._dirty = False
+
+
+def test_autosave_remembers_the_project_and_saving_clears_it(win, media, monkeypatch):
+    path = mw.autosave_path()
+    project = os.path.join(media["dir"], "autosave_test.qcut")
+    win.add_files([media["a"]])
+    monkeypatch.setattr(mw.QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (project, "")))
+    assert win.save_project_as()
+    assert not os.path.exists(path)
+
+    win.list.setCurrentRow(0)
+    win._set_trim(start=1.0, end=3.0)
+    win._autosave()
+    second = mw.MainWindow(TOOLS)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    second.offer_recovery()
+    assert second.project_path == project and second._dirty
+    assert second.save_project()
+    assert not os.path.exists(path)
+    second.close()
+    win._dirty = False
+
+
+def test_nothing_to_autosave_writes_nothing(win):
+    win._autosave()
+    assert not os.path.exists(mw.autosave_path())
+
+
+def test_saved_presets(win, app, monkeypatch):
+    panel = win.panel
+    panel.set_state({"format": ".mkv", "mode": "size", "size_mb": 77.0, "text": "hello"})
+    monkeypatch.setattr(ep.QInputDialog, "getText", staticmethod(lambda *a, **k: ("  My clips ", True)))
+    panel._ask_save_preset()
+    assert panel.platform.currentText() == "My clips"
+    assert panel.delete_preset_btn.isEnabled()
+
+    # A built-in preset changes everything; picking ours brings it all back.
+    panel.platform.setCurrentText("Discord (10 MB)")
+    assert panel.size_mb.value() == 10.0 and not panel.delete_preset_btn.isEnabled()
+    panel.platform.setCurrentText("My clips")
+    state = panel.get_state()
+    assert (state["format"], state["size_mb"], state["text"]) == (".mkv", 77.0, "hello")
+
+    # Saved across restarts, along with which preset was selected.
+    q = mw.app_settings()
+    panel.save_state(q)
+    reopened = ep.ExportPanel()
+    reopened.restore_state(q)
+    assert reopened.platform.currentText() == "My clips"
+    assert reopened.user_presets["My clips"]["size_mb"] == 77.0
+
+    # Editing a setting drops back to Custom, and the saved preset stays as it was.
+    panel.size_mb.setValue(5.0)
+    assert panel.platform.currentText() == ep.CUSTOM
+    assert not panel.delete_preset_btn.isEnabled()
+    assert panel.user_presets["My clips"]["size_mb"] == 77.0
+
+    # Built-in names can't be taken, and answering No keeps an existing preset.
+    monkeypatch.setattr(ep.QInputDialog, "getText", staticmethod(lambda *a, **k: ("Discord (10 MB)", True)))
+    panel._ask_save_preset()
+    assert "Discord (10 MB)" not in panel.user_presets
+    monkeypatch.setattr(ep.QInputDialog, "getText", staticmethod(lambda *a, **k: ("My clips", True)))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.No))
+    panel._ask_save_preset()
+    assert panel.user_presets["My clips"]["size_mb"] == 77.0
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    panel.platform.setCurrentText("My clips")
+    panel._ask_delete_preset()
+    assert panel.platform.currentText() == ep.CUSTOM
+    assert panel.platform.findText("My clips") < 0
+    assert ep.ExportPanel().user_presets == {}
+
+
+def test_damaged_saved_presets_are_ignored(app):
+    q = mw.app_settings()
+    q.setValue("presets/user", "not json")
+    assert ep.ExportPanel().user_presets == {}
+    q.setValue("presets/user", '["a list"]')
+    assert ep.ExportPanel().user_presets == {}
+    q.remove("presets/user")
 
 
 def test_export_each_clip_separately(win, media, monkeypatch):

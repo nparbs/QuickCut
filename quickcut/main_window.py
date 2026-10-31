@@ -10,7 +10,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QObject, QSize, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
@@ -24,7 +24,7 @@ from .command import (
     ExportPlan, auto_short_side, bits_per_pixel, build_plan, compute_bitrates, copy_mode_problems,
     effective_crossfade, output_duration, output_fps, output_frame, output_kind,
 )
-from .config import app_settings
+from .config import app_settings, autosave_path
 from .export_panel import FORMATS, ExportPanel
 from .exporter import ExportRunner
 from .ffmpeg import ENCODERS, FFmpegError, Tools, detect_encoders, probe
@@ -34,7 +34,7 @@ from .models import Clip, ExportSettings, Overlay
 from .overlays import render_logo, render_text
 from .player_view import PlayerView
 from .preview_dialog import PreviewDialog
-from .project import PROJECT_EXT, apply_clip_fields, load_project, save_project
+from .project import autosave_origin, PROJECT_EXT, apply_clip_fields, load_project, save_project
 from .theme import THEMES, apply_theme
 from .trim_bar import TrimBar
 from .updates import RELEASES_PAGE, UpdateChecker
@@ -107,6 +107,9 @@ class _EncoderProbe(QObject):
     done = Signal(list)
 
 
+AUTOSAVE_MS = 60_000
+
+
 class MainWindow(QMainWindow):
     def __init__(self, tools: Tools):
         super().__init__()
@@ -152,6 +155,9 @@ class MainWindow(QMainWindow):
         self._select_current()
         self._refresh()
         self._set_dirty(False)
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.timeout.connect(self._autosave)
+        self._autosave_timer.start(AUTOSAVE_MS)
         if self.qsettings.value("updates/check", False, type=bool):
             self.updates.result.connect(self._update_result_quiet)
             self.updates.check()
@@ -889,6 +895,35 @@ class MainWindow(QMainWindow):
 
     # == projects ==================================================================================
 
+    def _autosave(self):
+        if not self._dirty:
+            return
+        try:
+            save_project(autosave_path(), self._ordered(), self.panel.get_state(), autosave_of=self.project_path)
+        except OSError:
+            pass  # autosave is a safety net; never interrupt editing over it
+
+    def _clear_autosave(self):
+        try:
+            os.remove(autosave_path())
+        except OSError:
+            pass
+
+    def offer_recovery(self):
+        """After a crash: offer the edit that was autosaved. A clean exit leaves no file to find."""
+        path = autosave_path()
+        if not os.path.isfile(path):
+            return
+        answer = QMessageBox.question(self, "Recover your edit?",
+                                      "QuickCut didn't close properly last time. Recover your unsaved edit?")
+        if answer != QMessageBox.Yes:
+            self._clear_autosave()
+            return
+        origin = autosave_origin(path)
+        self.open_project(path, confirm=False, recovered=True)
+        self.project_path = origin
+        self._set_dirty()
+
     def _set_dirty(self, dirty: bool = True):
         self._dirty = dirty and bool(self.clips or self.project_path)
         name = Path(self.project_path).stem if self.project_path else "Untitled"
@@ -937,6 +972,7 @@ class MainWindow(QMainWindow):
         self.project_path = None
         self._reset_history()
         self._set_dirty(False)
+        self._clear_autosave()
 
     def open_project_dialog(self):
         if not self._confirm_discard():
@@ -946,7 +982,7 @@ class MainWindow(QMainWindow):
         if path:
             self.open_project(path, confirm=False)
 
-    def open_project(self, path: str, confirm: bool = True):
+    def open_project(self, path: str, confirm: bool = True, recovered: bool = False):
         if confirm and not self._confirm_discard():
             return
         try:
@@ -973,10 +1009,13 @@ class MainWindow(QMainWindow):
         self._replace_clips(clips)
         self.panel.set_state(export_state)
         self.project_path = path
-        self._remember_recent(path)
-        self.qsettings.setValue("dirs/project", str(Path(path).parent))
+        if not recovered:
+            self._remember_recent(path)
+            self.qsettings.setValue("dirs/project", str(Path(path).parent))
         self._reset_history()
         self._set_dirty(False)
+        if not recovered:
+            self._clear_autosave()
         if problems:
             QMessageBox.warning(self, "Some clips couldn't be loaded", "\n".join(problems[:15]))
 
@@ -990,6 +1029,7 @@ class MainWindow(QMainWindow):
             return False
         self._remember_recent(self.project_path)
         self._set_dirty(False)
+        self._clear_autosave()
         self.statusBar().showMessage(f"Saved {Path(self.project_path).name}", 4000)
         return True
 
@@ -1400,6 +1440,7 @@ class MainWindow(QMainWindow):
         if not self._confirm_discard(closing=True):
             e.ignore()
             return
+        self._clear_autosave()
         self.queue.cancel_all()
         if self._preview_runner:
             self._preview_runner.cancel()

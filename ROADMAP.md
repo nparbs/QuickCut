@@ -86,14 +86,14 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 
 ### Export
 - [ ] Keep 10-bit HDR when exporting to HEVC or AV1
-- [ ] Save your own export presets
+- [x] Save your own export presets
 - [ ] Choose which audio track to use for multi-track sources
 - [ ] Optional variable frame rate passthrough
 
 ### Usability
 - [ ] Live preview of framing and text in the player
 - [ ] Timeline view with clip widths proportional to length
-- [ ] Autosave and crash recovery for projects
+- [x] Autosave and crash recovery for projects
 - [ ] Zoomable timeline for precise trims on long videos
 
 ### Distribution and maintenance

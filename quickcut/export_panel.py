@@ -10,12 +10,13 @@ import json
 
 from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtWidgets import (
-    QAbstractSpinBox, QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel,
-    QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider,
-    QSpinBox, QVBoxLayout, QWidget,
+    QAbstractSpinBox, QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QInputDialog,
+    QLabel, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
+    QSlider, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from .command import TRANSITIONS, TWO_PASS_FAMILIES, codec_allowed, output_kind
+from .config import app_settings
 from .ffmpeg import CODEC_LABELS, CODEC_TIPS, ENCODERS, Encoder
 from .models import ExportSettings
 from .overlays import POSITIONS
@@ -102,10 +103,21 @@ class ExportPanel(QWidget):
         self.platform.addItems(list(PLATFORM_PRESETS))
         self.platform.setToolTip("Sets everything below for a common destination. "
                                  "Change anything afterwards and it becomes Custom.")
+        self.save_preset_btn = QPushButton("Save…")
+        self.save_preset_btn.setToolTip("Save all the settings below as your own preset, "
+                                        "including any text overlay and logo")
+        self.save_preset_btn.clicked.connect(self._ask_save_preset)
+        self.delete_preset_btn = QPushButton("Delete")
+        self.delete_preset_btn.setToolTip("Delete this saved preset")
+        self.delete_preset_btn.clicked.connect(self._ask_delete_preset)
         row = QHBoxLayout()
         row.addWidget(QLabel("<b>Preset</b>"))
         row.addWidget(self.platform, 1)
+        row.addWidget(self.save_preset_btn)
+        row.addWidget(self.delete_preset_btn)
         body.addLayout(row)
+        self.user_presets = self._load_user_presets()
+        self._fill_user_presets()
 
         # Output & video
         self.sec_video = sec = Section("Output and video")
@@ -429,12 +441,75 @@ class ExportPanel(QWidget):
         self._changed()
 
     def _apply_platform(self, name: str):
+        self._sync_preset_buttons()
         if name == CUSTOM or self._applying:
             return
-        self.set_state(preset_state(name))
+        self.set_state(self.user_presets[name] if name in self.user_presets else preset_state(name))
+        self._show_platform(name)
+
+    def _show_platform(self, name: str):
         self.platform.blockSignals(True)
         self.platform.setCurrentText(name)
         self.platform.blockSignals(False)
+        self._sync_preset_buttons()
+
+    def _sync_preset_buttons(self):
+        self.delete_preset_btn.setEnabled(self.platform.currentText() in self.user_presets)
+
+    # -- saved presets --------------------------------------------------------------------------
+
+    @staticmethod
+    def _load_user_presets() -> dict[str, dict]:
+        try:
+            presets = json.loads(app_settings().value("presets/user", "{}"))
+        except (ValueError, TypeError):
+            return {}
+        if not isinstance(presets, dict):
+            return {}
+        return {name: state for name, state in presets.items() if isinstance(state, dict)}
+
+    def _fill_user_presets(self):
+        current = self.platform.currentText()
+        self.platform.blockSignals(True)
+        while self.platform.count() > 1 + len(PLATFORM_PRESETS):
+            self.platform.removeItem(self.platform.count() - 1)
+        if self.user_presets:
+            self.platform.insertSeparator(self.platform.count())
+            self.platform.addItems(sorted(self.user_presets, key=str.lower))
+        self.platform.blockSignals(False)
+        self._show_platform(current if self.platform.findText(current) >= 0 else CUSTOM)
+
+    def save_user_preset(self, name: str):
+        self.user_presets[name] = self.get_state()
+        app_settings().setValue("presets/user", json.dumps(self.user_presets))
+        self._fill_user_presets()
+        self._show_platform(name)
+
+    def delete_user_preset(self, name: str):
+        self.user_presets.pop(name, None)
+        app_settings().setValue("presets/user", json.dumps(self.user_presets))
+        self._fill_user_presets()
+
+    def _ask_save_preset(self):
+        current = self.platform.currentText()
+        name, ok = QInputDialog.getText(self, "Save preset", "Name:",
+                                        text=current if current in self.user_presets else "")
+        name = name.strip()
+        if not ok or not name:
+            return
+        if name == CUSTOM or name in PLATFORM_PRESETS:
+            QMessageBox.warning(self, "Save preset", f"“{name}” is a built-in preset. Choose another name.")
+            return
+        if name in self.user_presets and QMessageBox.question(
+                self, "Save preset", f"Replace your preset “{name}”?") != QMessageBox.Yes:
+            return
+        self.save_user_preset(name)
+
+    def _ask_delete_preset(self):
+        name = self.platform.currentText()
+        if name in self.user_presets and QMessageBox.question(
+                self, "Delete preset", f"Delete your preset “{name}”?") == QMessageBox.Yes:
+            self.delete_user_preset(name)
 
     # -- encoders -------------------------------------------------------------------------------
 
@@ -498,9 +573,7 @@ class ExportPanel(QWidget):
             return
         if self.sender() is not None and self.sender() is not self.platform and \
                 self.platform.currentText() != CUSTOM and self.sender() in self.fields.values():
-            self.platform.blockSignals(True)
-            self.platform.setCurrentText(CUSTOM)
-            self.platform.blockSignals(False)
+            self._show_platform(CUSTOM)
         self._update_visibility()
         self.changed.emit()
 
@@ -620,10 +693,8 @@ class ExportPanel(QWidget):
             except (ValueError, TypeError):
                 pass
         platform = q.value("export/platform", CUSTOM)
-        if platform in PLATFORM_PRESETS:
-            self.platform.blockSignals(True)
-            self.platform.setCurrentText(platform)
-            self.platform.blockSignals(False)
+        if platform in PLATFORM_PRESETS or platform in self.user_presets:
+            self._show_platform(platform)
 
     # -- export progress ------------------------------------------------------------------------
 

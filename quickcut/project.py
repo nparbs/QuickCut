@@ -23,7 +23,7 @@ def clip_to_dict(clip: Clip, project_dir: Path) -> dict:
     return data
 
 
-def save_project(path: str, clips: list[Clip], export_state: dict):
+def save_project(path: str, clips: list[Clip], export_state: dict, autosave_of: str | None = None):
     project_dir = Path(path).resolve().parent
     data = {
         "app": "QuickCut",
@@ -32,6 +32,9 @@ def save_project(path: str, clips: list[Clip], export_state: dict):
         "clips": [clip_to_dict(c, project_dir) for c in clips],
         "export": export_state,
     }
+    if autosave_of:
+        data["autosave_of"] = autosave_of
+    os.makedirs(project_dir, exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -59,6 +62,15 @@ def load_project(path: str) -> tuple[list[dict], dict]:
             entry["path"] = found
         clips.append(entry)
     return clips, data.get("export", {})
+
+
+def autosave_origin(path: str) -> str | None:
+    """The project an autosave file belongs to, if it had one."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("autosave_of")
+    except (OSError, ValueError):
+        return None
 
 
 def apply_clip_fields(clip: Clip, entry: dict):

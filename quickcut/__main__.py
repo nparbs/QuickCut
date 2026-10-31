@@ -64,6 +64,8 @@ def main() -> int:
     server.filesReceived.connect(lambda paths: (window.add_files(paths) if paths else None,
                                                 window.bring_to_front()))
     window.show()
+    if not os.environ.get("QUICKCUT_SMOKE_TEST"):
+        window.offer_recovery()
     if files:
         window.add_files(files)
     if os.environ.get("QUICKCUT_SMOKE_TEST"):
