@@ -9,6 +9,7 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 - [x] Save your own export presets
 - [x] Autosave and crash recovery for projects
 - [x] Per-clip volume and mute
+- [x] Fix: two-pass target size exports failed with newer FFmpeg builds (including the bundled one)
 
 ### v0.2.0: distribution, editing, export and usability
 
@@ -75,7 +76,8 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 - Crop always keeps the **centre** of the frame; you can't move the crop area.
 - The live player doesn't show **reverse, framing, text, music or transitions**; use Preview edit for those.
 - Animated **WebP** files can't be opened in QuickCut itself (FFmpeg can't decode them).
-- **No re-encode** mode cuts on keyframes, so cuts can be off by up to a few seconds.
+- **No re-encode** mode cuts on keyframes, so cuts can be off by up to a few seconds. This includes Split into parts, where parts can come out the wrong length or overlap.
+- **Split into parts** cuts at fixed lengths only, and each clip is split on its own.
 - Tested mainly on **Windows** with an NVIDIA GPU. AMD and Intel GPU encoders, macOS and Linux are untested on real hardware, and there's no macOS/Linux download yet.
 - The Windows download isn't **code-signed**, so SmartScreen may warn the first time you run it.
 
@@ -93,6 +95,9 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 - [ ] Keep 10-bit HDR when exporting to HEVC or AV1
 - [ ] Choose which audio track to use for multi-track sources
 - [ ] Optional variable frame rate passthrough
+- [ ] Split into parts by frame count (e.g. 81 frames), which AI video models often expect, as well as by seconds
+- [ ] Split at scene changes, or with a set overlap between parts
+- [ ] Optional first-frame image (PNG) saved with each part, for image-to-video workflows
 
 ### Usability
 - [ ] Live preview of framing and text in the player
@@ -105,3 +110,4 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 - [ ] macOS and Linux builds
 - [ ] Packaging metadata (`pyproject.toml`) for `pip install`
 - [ ] Optional log file of FFmpeg commands and errors, for bug reports
+- [ ] Pin the FFmpeg version CI downloads, so a new FFmpeg build can't silently break releases
