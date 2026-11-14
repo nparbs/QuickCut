@@ -261,7 +261,7 @@ def encoder_args(enc: Encoder, rc: RateControl, speed: str, pass_num: int | None
         args += ["-preset", SPEED[f][speed]]
         args += ["-crf", str(q)] if rc.kind == "quality" else bitrate
         if f == "x264" and pass_num:
-            args += ["-pass", str(pass_num), "-passlogfile", PASSLOG]
+            args += ["-pass:v", str(pass_num), "-passlogfile:v", PASSLOG]
         if f == "x265":
             params = "log-level=error"
             if pass_num:
@@ -275,7 +275,7 @@ def encoder_args(enc: Encoder, rc: RateControl, speed: str, pass_num: int | None
         args += ["-deadline", "good", "-cpu-used", SPEED[f][speed], "-row-mt", "1"]
         args += ["-crf", str(min(q, 63)), "-b:v", "0"] if rc.kind == "quality" else bitrate
         if pass_num:
-            args += ["-pass", str(pass_num), "-passlogfile", PASSLOG]
+            args += ["-pass:v", str(pass_num), "-passlogfile:v", PASSLOG]
     elif f == "nvenc":
         args += ["-preset", SPEED[f][speed], "-tune", "hq", "-rc", "vbr"]
         if rc.kind == "quality":
