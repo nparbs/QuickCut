@@ -1,6 +1,11 @@
 # Changelog
 
-## [0.3.0] - 2026-11-14
+## [0.3.1] - 2026-11-14
+
+Version 0.3.0 was tagged but never released; 0.3.1 has everything below plus a fix for target file size exports.
+
+### Fixes
+- **Target file size** exports with two-pass encoding (CPU encoders) failed with newer FFmpeg builds, including the one bundled with the download.
 
 ### Editing
 - Per-clip **volume** (0–400 %) and **mute**, under the player. The player previews them (up to 100 %), the clip list shows "muted" or "vol 50%", and projects save them. No re-encode mode ignores them and says so.

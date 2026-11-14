@@ -4,7 +4,7 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 
 ## Done
 
-### v0.3.0: split into parts, presets, autosave
+### v0.3.1: split into parts, presets, autosave
 - [x] Split a video into parts of a set length (start time, part length, most parts), each part saved as its own file in a folder with the order and source times in the name, plus a `parts.csv` index
 - [x] Save your own export presets
 - [x] Autosave and crash recovery for projects
