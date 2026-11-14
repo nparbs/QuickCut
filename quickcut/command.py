@@ -37,6 +37,9 @@ RESOLUTION_STEPS = [2160, 1440, 1080, 720, 540, 480, 360, 240]
 # Below this many bits per pixel the codec turns blocky; used to auto-lower the resolution.
 MIN_BITS_PER_PIXEL = {"h264": 0.045, "hevc": 0.03, "vp9": 0.03, "av1": 0.025}
 GIF_MAX_FPS = 15
+# Splitting into parts: a leftover shorter than this joins the previous part instead of
+# becoming a file of its own.
+MIN_PART_REMAINDER = 0.1
 TRANSITIONS = ["fade", "dissolve", "fadeblack", "fadewhite", "wipeleft", "wiperight", "wipeup",
                "wipedown", "slideleft", "slideright", "slideup", "slidedown", "smoothleft",
                "smoothright", "circleopen", "circleclose", "radial", "zoomin", "pixelize",
@@ -164,6 +167,30 @@ def output_duration(clips: list[Clip], s: ExportSettings) -> float:
     if s.mode == "copy":
         return sum(c.length for c in clips)
     return sum(c.out_length for c in clips) - effective_crossfade(clips, s) * (len(clips) - 1)
+
+
+def split_into_parts(clip: Clip, seconds: float, start: float = 0.0,
+                     max_parts: int = 0) -> list[Clip]:
+    """The clip cut into pieces that each play for `seconds`, beginning `start` seconds into it.
+
+    Times are as the clip plays (after its trim, speed and reverse). The last piece keeps what's
+    left over; `max_parts` > 0 stops after that many pieces.
+    """
+    length = clip.out_length
+    if seconds <= 0 or start >= length - MIN_PART_REMAINDER:
+        return []
+    bounds = [max(0.0, start)]
+    while length - bounds[-1] > MIN_PART_REMAINDER and (not max_parts or len(bounds) <= max_parts):
+        nxt = bounds[-1] + seconds
+        # A tiny leftover joins this piece instead of becoming a file of its own.
+        bounds.append(length if length - nxt <= MIN_PART_REMAINDER else nxt)
+    parts = []
+    for a, b in zip(bounds, bounds[1:]):
+        a, b = a * clip.speed, b * clip.speed     # to seconds of the source
+        # A reversed clip plays from its end, so its first piece is the last stretch of the source.
+        lo, hi = (clip.end - b, clip.end - a) if clip.reverse else (clip.start + a, clip.start + b)
+        parts.append(replace(clip, start=max(clip.start, lo), end=min(clip.end, hi)))
+    return parts
 
 
 def uses_two_pass(s: ExportSettings) -> bool:

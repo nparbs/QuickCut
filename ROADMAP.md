@@ -4,6 +4,12 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 
 ## Done
 
+### v0.3.0: split into parts, presets, autosave
+- [x] Split a video into parts of a set length (start time, part length, most parts), each part saved as its own file in a folder with the order and source times in the name, plus a `parts.csv` index
+- [x] Save your own export presets
+- [x] Autosave and crash recovery for projects
+- [x] Per-clip volume and mute
+
 ### v0.2.0: distribution, editing, export and usability
 
 **Distribution**
@@ -50,7 +56,7 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 - [x] Splitter sizes and window layout remembered
 - [x] Plain-language tooltips for codecs, encoders and settings
 
-**Tests**: 71 automated tests (6 of them need AMD or Intel GPUs), including end-to-end exports for every feature, and GUI tests that drive the real window off-screen.
+**Tests**: 85 automated tests (6 of them need AMD or Intel GPUs), including end-to-end exports for every feature, and GUI tests that drive the real window off-screen.
 
 ### v0.1.0: first release
 - [x] Trimming with preview, timeline handles and keyboard shortcuts
@@ -78,7 +84,6 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 ### Editing
 - [ ] Per-cut transition style and length
 - [ ] Drag to position the crop area; per-clip crop
-- [x] Per-clip volume and mute
 - [ ] Freeze frame and still-image clips (photos in a slideshow)
 - [ ] Subtitles: burn in `.srt` files
 - [ ] Multiple text overlays, each with its own timing
@@ -86,14 +91,12 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 
 ### Export
 - [ ] Keep 10-bit HDR when exporting to HEVC or AV1
-- [x] Save your own export presets
 - [ ] Choose which audio track to use for multi-track sources
 - [ ] Optional variable frame rate passthrough
 
 ### Usability
 - [ ] Live preview of framing and text in the player
 - [ ] Timeline view with clip widths proportional to length
-- [x] Autosave and crash recovery for projects
 - [ ] Zoomable timeline for precise trims on long videos
 
 ### Distribution and maintenance

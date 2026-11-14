@@ -81,6 +81,7 @@ class ExportPanel(QWidget):
     changed = Signal()
     exportRequested = Signal()
     queueRequested = Signal()
+    splitRequested = Signal()
     previewRequested = Signal()
     cancelRequested = Signal()
 
@@ -332,6 +333,9 @@ class ExportPanel(QWidget):
         side.setSpacing(6)
         side.addWidget(self.preview_btn)
         side.addWidget(self.queue_btn)
+        self.split_btn = QPushButton("Split into parts…")
+        self.split_btn.setToolTip("Cut each video into pieces of a set length, such as 5 seconds, "
+                                  "and save every piece as its own file.")
         self.export_btn = QPushButton("Export…")
         self.export_btn.setMinimumHeight(38)
         self.export_btn.setStyleSheet("font-weight: bold; font-size: 11pt;")
@@ -346,6 +350,7 @@ class ExportPanel(QWidget):
         foot.addWidget(self.summary)
         foot.addWidget(self.progress)
         foot.addLayout(side)
+        foot.addWidget(self.split_btn)
         foot.addWidget(self.export_btn)
         foot.addWidget(self.cancel_btn)
         foot.addWidget(self.status)
@@ -358,6 +363,7 @@ class ExportPanel(QWidget):
 
         self.export_btn.clicked.connect(self.exportRequested)
         self.queue_btn.clicked.connect(self.queueRequested)
+        self.split_btn.clicked.connect(self.splitRequested)
         self.preview_btn.clicked.connect(self.previewRequested)
         self.cancel_btn.clicked.connect(self.cancelRequested)
         self.platform.currentTextChanged.connect(self._apply_platform)
@@ -444,6 +450,13 @@ class ExportPanel(QWidget):
         self._sync_preset_buttons()
         if name == CUSTOM or self._applying:
             return
+        self.apply_preset(name)
+
+    def preset_names(self) -> tuple[list[str], list[str]]:
+        """(built-in presets, saved presets)."""
+        return list(PLATFORM_PRESETS), sorted(self.user_presets, key=str.lower)
+
+    def apply_preset(self, name: str):
         self.set_state(self.user_presets[name] if name in self.user_presets else preset_state(name))
         self._show_platform(name)
 
@@ -512,6 +525,10 @@ class ExportPanel(QWidget):
             self.delete_user_preset(name)
 
     # -- encoders -------------------------------------------------------------------------------
+
+    @property
+    def encoders(self) -> list[Encoder]:
+        return self._encoders
 
     def set_encoders(self, encoders: list[Encoder]):
         self._encoders = encoders

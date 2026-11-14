@@ -1,6 +1,7 @@
 """Drives the real main window: editing, undo, presets, projects, queue, preview, overlays."""
 from __future__ import annotations
 
+import csv
 import os
 import subprocess
 import sys
@@ -274,6 +275,54 @@ def test_export_each_clip_separately(win, media, monkeypatch):
     _run_queue(win)
     names = sorted(os.listdir(out_dir))
     assert names == ["a_edit.mkv", "a_edit_2.mkv", "b_edit.mkv"]
+
+
+def test_split_into_parts(win, media, monkeypatch):
+    from quickcut import split_dialog as sd
+    out_dir = tempfile.mkdtemp(prefix="quickcut_parts_")
+    win.add_files([media["a"]])   # 4 s
+    win.panel.set_state({"format": ".mkv", "mode": "preset", "aspect": "", "text": "", "logo": ""})
+    monkeypatch.setattr(mw.QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: out_dir))
+
+    def run(start, seconds, most, preset):
+        def fake_exec(dialog):
+            dialog.start.setValue(start)
+            dialog.seconds.setValue(seconds)
+            dialog.max_parts.setValue(most)
+            dialog.preset.setCurrentIndex(dialog.preset.findData(preset))
+            return sd.SplitDialog.Accepted
+        monkeypatch.setattr(sd.SplitDialog, "exec", fake_exec)
+        win.export_parts()
+        _run_queue(win)
+
+    # Start 1 s in, 1.2 s parts: 1.2, 1.2 and the 0.6 s left over, in a folder of their own with
+    # the order and source times in each name.
+    run(1.0, 1.2, 0, sd.CURRENT)
+    folder = os.path.join(out_dir, "a_parts")
+    names = sorted(os.listdir(folder))
+    assert names == ["a_01_00m01.0s-00m02.2s.mkv", "a_02_00m02.2s-00m03.4s.mkv",
+                     "a_03_00m03.4s-00m04.0s.mkv", "parts.csv"]
+    lengths = [probe(TOOLS, os.path.join(folder, n)).duration for n in names[:3]]
+    assert [round(x, 1) for x in lengths] == [1.2, 1.2, 0.6]
+    with open(os.path.join(folder, "parts.csv"), encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert [r["file"] for r in rows] == names[:3]
+    assert (rows[0]["order"], rows[0]["start_seconds"], rows[2]["end_seconds"]) == ("1", "1.000", "4.000")
+
+    # Running it again makes a new folder instead of mixing sets.
+    run(1.0, 1.2, 0, sd.CURRENT)
+    assert len(os.listdir(os.path.join(out_dir, "a_parts_2"))) == 4
+
+    # A preset just for the parts, and a limit on how many.
+    run(0.0, 1.0, 2, "GIF (small, 480p)")
+    gifs = sorted(os.listdir(os.path.join(out_dir, "a_parts_3")))
+    assert gifs == ["a_01_00m00.0s-00m01.0s.gif", "a_02_00m01.0s-00m02.0s.gif", "parts.csv"]
+    gif = probe(TOOLS, os.path.join(out_dir, "a_parts_3", gifs[0]))
+    assert min(gif.width, gif.height) == 480
+    # The export panel itself is untouched, and the dialog remembers the choices.
+    assert win.panel.extension == ".mkv" and win.panel.platform.currentText() == ep.CUSTOM
+    assert win.qsettings.value("split/preset") == "GIF (small, 480p)"
+    assert win.qsettings.value("split/max_parts", type=int) == 2
 
 
 def test_project_roundtrip(win, media, monkeypatch):

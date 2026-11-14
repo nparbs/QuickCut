@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] - 2026-11-14
 
 ### Editing
 - Per-clip **volume** (0–400 %) and **mute**, under the player. The player previews them (up to 100 %), the clip list shows "muted" or "vol 50%", and projects save them. No re-encode mode ignores them and says so.
@@ -9,6 +9,7 @@
 - **Autosave and crash recovery**: unsaved edits are saved in the background every minute. If QuickCut doesn't close properly, it offers to bring your edit back the next time it starts.
 
 ### Export
+- **Split into parts**: cut a video into pieces of a set length (for example 5 seconds) and save each one as its own file. Choose where to start, how long each part is and the most parts to make; the last part keeps whatever is left over. The parts use their own preset (any built-in or saved one), so they can be compressed differently from your normal exports. Each video's parts go in their own folder, named in order with their start and end times in the source (`clip_01_00m10.0s-00m17.0s.mp4`), along with a `parts.csv` index. Handy for reference clips in AI video tools such as ComfyUI.
 - **Save your own presets**: **Save…** next to the Preset list stores all the export settings under a name, including any text overlay and logo. Saved presets appear below the built-in ones and can be replaced or deleted.
 
 ## [0.2.0] - 2026-10-21

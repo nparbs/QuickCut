@@ -42,7 +42,7 @@ To open videos straight from Explorer, turn on **Tools → Add “Open with Quic
 - **Codecs**: H.264, HEVC, AV1 and VP9, on the CPU or GPU. QuickCut checks at startup which ones your PC can use.
 - **Audio**: remove, volume 0–300 %, even out loudness, bitrate.
 - **HDR** phone videos are converted to normal colours, so they don't look washed out.
-- **Export queue**: keep editing while exports run one after another. You can also **export each clip separately**.
+- **Export queue**: keep editing while exports run one after another. You can also **export each clip separately**, or **split a video into parts** of a set length (for example 5-second reference clips) with their own preset, saved to a folder with the order and times in each file name.
 - **Preview edit** (Ctrl+P): a quick low-resolution render of the whole edit, with transitions, text and music.
 
 ## How to use

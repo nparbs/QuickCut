@@ -72,3 +72,53 @@ def test_project_relative_paths(tmp_path):
     older = Clip(_info(entries[0]["path"]))
     apply_clip_fields(older, old)
     assert (older.volume, older.muted) == (1.0, False)
+
+
+def _spans(parts):
+    return [(round(p.start, 3), round(p.end, 3)) for p in parts]
+
+
+def test_split_into_even_parts():
+    from quickcut.command import split_into_parts
+    parts = split_into_parts(Clip(MediaInfo("x.mp4", 20, 1920, 1080, "30", 30, True, "h264", 0)), 5)
+    assert _spans(parts) == [(0, 5), (5, 10), (10, 15), (15, 20)]
+
+
+def test_split_with_start_time_and_leftover():
+    from quickcut.command import split_into_parts
+    clip = Clip(MediaInfo("x.mp4", 30, 1920, 1080, "30", 30, True, "h264", 0))
+    parts = split_into_parts(clip, 7, start=10)
+    assert _spans(parts) == [(10, 17), (17, 24), (24, 30)]
+    assert [round(p.out_length, 3) for p in parts] == [7, 7, 6]
+
+
+def test_split_max_parts_and_edge_cases():
+    from quickcut.command import split_into_parts
+    clip = Clip(MediaInfo("x.mp4", 30, 1920, 1080, "30", 30, True, "h264", 0))
+    assert _spans(split_into_parts(clip, 7, start=10, max_parts=2)) == [(10, 17), (17, 24)]
+    assert split_into_parts(clip, 5, start=30) == []
+    # A leftover under 0.1 s joins the last part instead of being its own file.
+    assert _spans(split_into_parts(clip, 9.98)) == [(0, 9.98), (9.98, 19.96), (19.96, 30)]
+    # A clip shorter than one part comes out whole.
+    assert _spans(split_into_parts(clip, 60)) == [(0, 30)]
+
+
+def test_split_respects_trim_speed_and_reverse():
+    from quickcut.command import split_into_parts
+    info = MediaInfo("x.mp4", 30, 1920, 1080, "30", 30, True, "h264", 0)
+    # Trimmed to 10-20; times count from the trim start.
+    assert _spans(split_into_parts(Clip(info, start=10, end=20), 4, start=1)) == [(11, 15), (15, 19), (19, 20)]
+    # At 2x, a 5 s part covers 10 s of source.
+    fast = split_into_parts(Clip(info, speed=2.0), 5)
+    assert _spans(fast) == [(0, 10), (10, 20), (20, 30)]
+    assert all(abs(p.out_length - 5) < 1e-9 for p in fast)
+    # Reversed clips play from the end, so the first part is the end of the source.
+    assert _spans(split_into_parts(Clip(info, reverse=True), 10)) == [(20, 30), (10, 20), (0, 10)]
+
+
+def test_part_file_names():
+    from quickcut.split_dialog import part_filename, part_time
+    assert part_time(10) == "00m10.0s" and part_time(59.96) == "01m00.0s"
+    assert part_time(3725.5) == "1h02m05.5s"
+    info = MediaInfo("x.mp4", 30, 1920, 1080, "30", 30, True, "h264", 0)
+    assert part_filename("clip", 3, 120, Clip(info, start=24, end=30), ".mp4") == "clip_003_00m24.0s-00m30.0s.mp4"

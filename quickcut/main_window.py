@@ -34,6 +34,7 @@ from .models import Clip, ExportSettings, Overlay
 from .overlays import render_logo, render_text
 from .player_view import PlayerView
 from .preview_dialog import PreviewDialog
+from .split_dialog import CURRENT, MAX_PARTS, PARTS_INDEX, SplitDialog, part_filename, write_parts_index
 from .project import autosave_origin, PROJECT_EXT, apply_clip_fields, load_project, save_project
 from .theme import THEMES, apply_theme
 from .trim_bar import TrimBar
@@ -133,6 +134,7 @@ class MainWindow(QMainWindow):
         self.cache = MediaCache(tools, self)
         self.cache.ready.connect(self._image_ready)
         self.queue = JobQueue(self)
+        self._scratch_panel: ExportPanel | None = None   # hidden panel for split-into-parts presets
         self.queue.changed.connect(self._queue_changed)
         self.queue.progress.connect(self._job_progress)
         self.queue.finished.connect(self._job_finished)
@@ -342,6 +344,7 @@ class MainWindow(QMainWindow):
         self.panel.changed.connect(self._panel_changed)
         self.panel.exportRequested.connect(self.export)
         self.panel.queueRequested.connect(self.export_separately)
+        self.panel.splitRequested.connect(self.export_parts)
         self.panel.previewRequested.connect(self.preview_edit)
         self.panel.cancelRequested.connect(self.queue.cancel_current)
         self.splitter.addWidget(self.panel)
@@ -405,6 +408,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         self._action(m, "&Export…", self.export, "Ctrl+E")
         self._action(m, "Export each clip &separately…", self.export_separately)
+        self._action(m, "Split into &parts…", self.export_parts)
         self._action(m, "&Preview edit", self.preview_edit, "Ctrl+P")
         m.addSeparator()
         self._action(m, "E&xit", self.close)
@@ -1172,10 +1176,10 @@ class MainWindow(QMainWindow):
             return None
         return clips
 
-    def _plan_with_overlays(self, clips: list[Clip], s: ExportSettings) -> tuple[ExportPlan, str | None]:
+    def _plan_with_overlays(self, clips: list[Clip], s: ExportSettings,
+                            spec: dict) -> tuple[ExportPlan, str | None]:
         """Build the plan, rendering text/logo overlays at the final frame size first."""
         plan = build_plan(self.tools.ffmpeg, clips, s)
-        spec = self.panel.overlay_spec()
         if s.mode == "copy" or output_kind(s.output) == "audio" or not (spec["text"] or spec["logo"]):
             return plan, None
         temp_dir = tempfile.mkdtemp(prefix="quickcut_overlay_")
@@ -1195,11 +1199,12 @@ class MainWindow(QMainWindow):
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise
 
-    def _queue_export(self, clips: list[Clip], output: str) -> bool:
-        s = self.panel.settings()
+    def _queue_export(self, clips: list[Clip], output: str, panel: ExportPanel | None = None) -> bool:
+        panel = panel or self.panel
+        s = panel.settings()
         s.output = output
         try:
-            plan, temp_dir = self._plan_with_overlays(clips, s)
+            plan, temp_dir = self._plan_with_overlays(clips, s, panel.overlay_spec())
         except ValueError as exc:
             QMessageBox.warning(self, "QuickCut", str(exc))
             return False
@@ -1259,6 +1264,86 @@ class MainWindow(QMainWindow):
         if added:
             self.jobs_dock.show()
             self.statusBar().showMessage(f"Added {added} export{'s' if added != 1 else ''} to the queue", 5000)
+
+    def _panel_for(self, preset: str) -> ExportPanel:
+        """The export panel itself, or a hidden copy of it with a preset applied on top."""
+        if preset == CURRENT:
+            return self.panel
+        if self._scratch_panel is not None:
+            self._scratch_panel.deleteLater()
+        scratch = self._scratch_panel = ExportPanel()
+        scratch.set_encoders(self.panel.encoders)
+        scratch.set_state(self.panel.get_state())
+        scratch.apply_preset(preset)
+        return scratch
+
+    def export_parts(self):
+        """Cut every clip into parts of a set length and queue each part as its own file."""
+        clips = self._ordered()
+        if not clips:
+            QMessageBox.information(self, "QuickCut", "Add at least one video first.")
+            return
+        builtin, saved = self.panel.preset_names()
+        preset = self.qsettings.value("split/preset", CURRENT)
+        if preset not in builtin and preset not in saved:
+            preset = CURRENT
+        q = self.qsettings
+        dialog = SplitDialog(clips, self.panel, self._panel_for,
+                             q.value("split/seconds", 5.0, type=float), preset,
+                             q.value("split/start", 0.0, type=float),
+                             q.value("split/max_parts", 0, type=int), self)
+        if dialog.exec() != SplitDialog.Accepted or not 0 < dialog.part_count() <= MAX_PARTS:
+            return
+        preset = dialog.preset_name()
+        q.setValue("split/seconds", dialog.part_seconds())
+        q.setValue("split/start", dialog.start_seconds())
+        q.setValue("split/max_parts", dialog.part_limit())
+        q.setValue("split/preset", preset)
+        panel = self._panel_for(preset)
+        if panel.kind == "video" and panel.mode.currentData() != "copy" and not panel.encoder.currentData():
+            QMessageBox.information(self, "QuickCut", "Still checking encoders, try again in a moment.")
+            return
+        start = self.qsettings.value("dirs/save", str(Path(clips[0].info.path).parent))
+        out_dir = QFileDialog.getExistingDirectory(self, "Save the parts to folder", start)
+        if not out_dir:
+            return
+        self.qsettings.setValue("dirs/save", out_dir)
+        self.player.pause()
+        ext = panel.extension
+        used: set[str] = set()
+        added, folders = 0, []
+        for clip in clips:
+            parts = dialog.parts(clip)
+            if not parts:
+                continue
+            # Each clip's parts go in a folder of their own, which is never reused.
+            base = Path(clip.info.path).stem
+            folder, n = Path(out_dir) / f"{base}_parts", 2
+            while folder.exists() or os.path.normcase(str(folder)) in used:
+                folder = Path(out_dir) / f"{base}_parts_{n}"
+                n += 1
+            used.add(os.path.normcase(str(folder)))
+            try:
+                folder.mkdir(parents=True)
+                write_parts_index(str(folder / PARTS_INDEX), base, parts, ext)
+            except OSError as exc:
+                QMessageBox.warning(self, "QuickCut", f"Can't create {folder}:\n{exc}")
+                break
+            folders.append(folder)
+            stopped = False
+            for i, part in enumerate(parts, 1):
+                path = folder / part_filename(base, i, len(parts), part, ext)
+                if not self._queue_export([part], str(path), panel):
+                    stopped = True
+                    break
+                added += 1
+            if stopped:
+                break
+        if added:
+            self.jobs_dock.show()
+            where = folders[0].name if len(folders) == 1 else f"{len(folders)} folders"
+            self.statusBar().showMessage(f"Added {added} part{'s' if added != 1 else ''} to the queue "
+                                         f"(saving to {where})", 8000)
 
     def _queue_changed(self):
         busy = self.queue.current is not None
@@ -1327,7 +1412,8 @@ class MainWindow(QMainWindow):
             return
         out = os.path.join(tempfile.gettempdir(), f"quickcut_preview_{os.getpid()}_{int(time.time())}.mp4")
         try:
-            plan, temp_dir = self._plan_with_overlays(clips, self.preview_settings(out))
+            plan, temp_dir = self._plan_with_overlays(clips, self.preview_settings(out),
+                                                      self.panel.overlay_spec())
         except ValueError as exc:
             QMessageBox.warning(self, "QuickCut", str(exc))
             return
