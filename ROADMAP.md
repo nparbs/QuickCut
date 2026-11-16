@@ -111,3 +111,13 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 - [ ] Packaging metadata (`pyproject.toml`) for `pip install`
 - [ ] Optional log file of FFmpeg commands and errors, for bug reports
 - [ ] Pin the FFmpeg version CI downloads, so a new FFmpeg build can't silently break releases
+
+## Code review (2026-11-15)
+
+A short, partial read of the code (mostly server and network paths), not a full audit.
+Nothing was changed.
+
+- [ ] Exports write straight to the chosen file, so overwriting an existing file and then failing or cancelling loses it (ffmpeg has already replaced it, and `_remove_output` deletes what is left). Write to a temporary name and rename on success.
+- [ ] If a thumbnail, filmstrip or waveform maker raises, its job is never marked finished and that image stays blank for the session (`media_cache.py`).
+- [ ] `load_project` tries a clip's absolute path before its relative one, so a project copied together with its media still uses the old location whenever that still exists.
+- [ ] Finished export runners are never deleted, so they pile up until the app closes. Tiny.
