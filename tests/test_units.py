@@ -122,3 +122,91 @@ def test_part_file_names():
     assert part_time(3725.5) == "1h02m05.5s"
     info = MediaInfo("x.mp4", 30, 1920, 1080, "30", 30, True, "h264", 0)
     assert part_filename("clip", 3, 120, Clip(info, start=24, end=30), ".mp4") == "clip_003_00m24.0s-00m30.0s.mp4"
+
+
+# -- framing and layers -------------------------------------------------------------------------
+
+def test_framing_fill_fit_and_pan_limits():
+    from quickcut.framing import clamp_pan, crop_plan, fit_zoom, placement
+    # 16:9 clip in a 9:16 frame: fill crops the sides, fit leaves bars above and below.
+    p = placement(1920, 1080, 1080, 1920, 1.0)
+    assert round(p.height) == 1920 and p.width > 1080 and abs(p.left + p.width / 2 - 540) < 1e-6
+    z = fit_zoom(1920, 1080, 1080, 1920)
+    p = placement(1920, 1080, 1080, 1920, z)
+    assert round(p.width) == 1080 and round(p.height) == 608
+    # Pushing it left stops with its right edge on the frame's, so no gap opens.
+    px, py = clamp_pan(1920, 1080, 1080, 1920, 1.0, -5.0, 0.5)
+    p = placement(1920, 1080, 1080, 1920, 1.0, px, py)
+    assert abs(p.left + p.width - 1080) < 1e-6
+    # ...and pushing it right shows its left edge, which crops the source from x = 0.
+    cp = crop_plan(1920, 1080, 1080, 1920, 1.0, 5.0, 0.5)
+    assert cp.covers and cp.crop[2] == 0 and (cp.width, cp.height) == (1080, 1920)
+    # Zoomed out to fit: the whole source, padded top and bottom.
+    cp = crop_plan(1920, 1080, 1080, 1920, z)
+    assert not cp.covers and cp.crop is None and cp.width == 1080
+    assert abs(cp.y - (1920 - cp.height) / 2) <= 1
+    # Smaller than the frame: stays inside it whichever way it's pushed.
+    cp = crop_plan(1280, 720, 1280, 720, 0.5, 2.0, 2.0)
+    assert (cp.x + cp.width, cp.y + cp.height) == (1280, 720)
+
+
+def test_clip_zoom_follows_fill_setting_until_set():
+    from quickcut.framing import clip_zoom
+    assert clip_zoom(None, "crop", 1920, 1080, 1080, 1920) == 1.0
+    assert clip_zoom(None, "pad", 1920, 1080, 1080, 1920) < 0.5
+    assert clip_zoom(1.7, "pad", 1920, 1080, 1080, 1920) == 1.7
+    assert clip_zoom(99, "pad", 1920, 1080, 1080, 1920) == 4.0
+
+
+def test_filter_graph_uses_clip_framing():
+    from quickcut.command import build_filtergraph
+    from quickcut.models import ExportSettings
+    s = ExportSettings(aspect="9:16", fit="pad", height=1080)
+    plain = build_filtergraph([Clip(_info())], s, 1080, 1920, "30", audio=False)
+    assert "pad=1080:1920" in plain and "crop=" not in plain
+    zoomed = build_filtergraph([Clip(_info(), zoom=1.0, pan_x=5.0)], s, 1080, 1920, "30", audio=False)
+    assert "crop=iw*0.316667:ih*1.000000:iw*0.000000:ih*0.000000" in zoomed and "pad=1080" not in zoomed
+    blur = build_filtergraph([Clip(_info())], ExportSettings(aspect="9:16", fit="blur"), 1080, 1920, "30",
+                             audio=False)
+    assert "boxblur" in blur and "overlay=0:656" in blur
+
+
+def test_project_keeps_framing_and_layers(tmp_path):
+    from quickcut.models import Layer
+    from quickcut.project import load_layers
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"")
+    logo = tmp_path / "art" / "logo.png"
+    logo.parent.mkdir()
+    logo.write_bytes(b"")
+    clip = Clip(_info(str(video)), zoom=1.5, pan_x=0.2, pan_y=0.7)
+    layers = [Layer("text", text="Hi", x=0.3, y=0.4, size=9, start=1, duration=2, hidden=True),
+              Layer("image", image=str(logo), size=20, opacity=0.5)]
+    proj = tmp_path / "p.qcut"
+    save_project(str(proj), [clip], {}, layers=layers)
+    entries, _ = load_project(str(proj))
+    fresh = Clip(_info(str(video)))
+    apply_clip_fields(fresh, entries[0])
+    assert (fresh.zoom, fresh.pan_x, fresh.pan_y) == (1.5, 0.2, 0.7)
+    loaded = load_layers(str(proj))
+    assert loaded == layers and loaded[0].end == 3
+    # A clip that was never framed stays on the Fill setting.
+    save_project(str(proj), [Clip(_info(str(video)))], {})
+    unframed = Clip(_info(str(video)))
+    apply_clip_fields(unframed, load_project(str(proj))[0][0])
+    assert unframed.zoom is None
+
+
+def test_old_projects_turn_text_and_logo_into_layers(tmp_path):
+    from quickcut.overlays import layers_from_old_settings
+    from quickcut.project import load_layers
+    proj = tmp_path / "old.qcut"
+    proj.write_text(json.dumps({"app": "QuickCut", "format": 1, "clips": [], "export": {}}))
+    assert load_layers(str(proj)) is None
+    layers = layers_from_old_settings({"text": "Title", "text_pos": "top", "text_size": 8, "text_start": 1,
+                                       "text_duration": 0, "logo": "x.png", "logo_pos": "bottom-right",
+                                       "logo_size": 15, "logo_opacity": 85})
+    assert [layer.kind for layer in layers] == ["image", "text"]   # text stays on top, like before
+    assert layers[1].y < 0.5 and layers[1].size == 8 and layers[1].end is None
+    assert layers[0].x > 0.5 and abs(layers[0].opacity - 0.85) < 1e-9
+    assert layers_from_old_settings({"text": "  ", "logo": ""}) == []

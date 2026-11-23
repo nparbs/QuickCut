@@ -340,3 +340,48 @@ def test_auto_resolution(media):
 def test_software_fallback_plan_exists(media):
     plan = build_plan(TOOLS.ffmpeg, _clips(media, "a"), ExportSettings(output="x.mp4"))
     assert "-hwaccel" in plan.passes[-1] and plan.fallback and "-hwaccel" not in plan.fallback.passes[-1]
+
+
+def _pixel(path, x, y, t=0.5):
+    raw = subprocess.run([TOOLS.ffmpeg, "-v", "error", "-ss", str(t), "-i", path, "-frames:v", "1",
+                          "-vf", f"crop=1:1:{x}:{y},format=rgb24", "-f", "rawvideo", "-"],
+                         capture_output=True, check=True).stdout
+    return tuple(raw[:3])
+
+
+@pytest.fixture(scope="module")
+def halves(media):
+    """Red on the left, blue on the right, 640x360."""
+    path = os.path.join(media["dir"], "halves.mp4")
+    subprocess.run([TOOLS.ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x360:d=2",
+                    "-f", "lavfi", "-i", "color=c=blue:s=320x360:d=2", "-filter_complex", "hstack",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", path], check=True)
+    return path
+
+
+@pytest.mark.parametrize("fit", ["pad", "blur"])
+def test_zoomed_and_panned_clip(media, halves, fit):
+    # Zoomed in 2x and pushed all the way right: only the red left half shows.
+    clip = Clip(probe(TOOLS, halves), zoom=2.0, pan_x=5.0)
+    info, _ = _export(media, [clip], name=f"zoom_red_{fit}", fit=fit)
+    assert (info.width, info.height) == (640, 360)
+    for x in (5, 320, 634):
+        r, g, b = _pixel(info.path, x, 180)
+        assert r > 180 and b < 80, (x, r, g, b)
+    # In a square frame at the Fill zoom, pushed left: only blue.
+    clip = Clip(probe(TOOLS, halves), zoom=1.0, pan_x=-5.0)
+    info, _ = _export(media, [clip], name=f"zoom_blue_{fit}", fit=fit, aspect="1:1")
+    assert (info.width, info.height) == (360, 360)
+    # The square shows source x 280-640, so the red/blue seam is 40 px in.
+    assert _pixel(info.path, 20, 180)[0] > 180
+    r, g, b = _pixel(info.path, 100, 180)
+    assert b > 180 and r < 80
+
+
+def test_zoomed_out_clip_sits_where_placed(media, halves):
+    # Half size, in the top-left corner of a 640x360 frame: the rest is black.
+    clip = Clip(probe(TOOLS, halves), zoom=0.5, pan_x=0.0, pan_y=0.0)
+    info, _ = _export(media, [clip], name="zoom_out")
+    assert _pixel(info.path, 20, 20)[0] > 180               # red, inside the shrunk clip
+    assert _pixel(info.path, 300, 170)[2] > 180             # blue half of the shrunk clip
+    assert max(_pixel(info.path, 600, 300)) < 40            # black bars

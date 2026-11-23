@@ -5,6 +5,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .ffmpeg import ENCODERS, Encoder
+from .framing import clip_zoom, crop_plan
 from .models import Clip, ExportSettings
 
 # x264 CRF values for each quality preset.
@@ -333,21 +334,28 @@ def _clip_video(i: int, c: Clip, s: ExportSettings, w: int, h: int, fps: str) ->
     # and the transition offsets correct.
     post = (f"setsar=1,fps={fps},format=yuv420p,tpad=stop_mode=clone:stop_duration=1,"
             f"trim=duration={c.out_length:.3f}")
+    cw, ch = c.display_size
+    zoom = clip_zoom(c.zoom, s.fit, cw, ch, w, h)
+    cp = crop_plan(cw, ch, w, h, zoom, c.pan_x, c.pan_y)
+    fg = f"scale={cp.width}:{cp.height}"
+    if cp.crop:
+        # As fractions of the decoded size, so a source whose real size differs a little from
+        # what probing reported still crops the same area instead of failing.
+        cx, cy = cp.crop[2] / cw, cp.crop[3] / ch
+        fg = (f"crop=iw*{cp.crop[0] / cw:.6f}:ih*{cp.crop[1] / ch:.6f}:iw*{cx:.6f}:ih*{cy:.6f},"
+              + fg)
+    if cp.covers:
+        return [f"[{i}:v:0]{pre},{fg},{post}[v{i}]"]
     if s.fit == "blur":
         bw, bh = _even(w / 4), _even(h / 4)
         return [
             f"[{i}:v:0]{pre},split[s{i}a][s{i}b]",
             f"[s{i}a]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
             f"boxblur=8,scale={w}:{h},setsar=1[bg{i}]",
-            f"[s{i}b]scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
-            f"setsar=1[fg{i}]",
-            f"[bg{i}][fg{i}]overlay=(W-w)/2:(H-h)/2,{post}[v{i}]",
+            f"[s{i}b]{fg},setsar=1[fg{i}]",
+            f"[bg{i}][fg{i}]overlay={cp.x}:{cp.y},{post}[v{i}]",
         ]
-    if s.fit == "crop":
-        fit = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
-    else:
-        fit = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2"
-    return [f"[{i}:v:0]{pre},{fit},{post}[v{i}]"]
+    return [f"[{i}:v:0]{pre},{fg},pad={w}:{h}:{cp.x}:{cp.y}:black,{post}[v{i}]"]
 
 
 def _clip_audio(i: int, c: Clip) -> str:
@@ -474,9 +482,11 @@ def copy_mode_problems(clips: list[Clip], s: ExportSettings) -> tuple[list[str],
         warnings.append("Speed, rotation, flips and reverse are ignored.")
     if any(c.has_audio_changes for c in clips):
         warnings.append("Per-clip volume and mute are ignored.")
+    if any(c.has_framing for c in clips):
+        warnings.append("Clip zoom and position are ignored.")
     if (s.height or s.fps or s.aspect or s.overlays or s.music or s.fade_in or s.fade_out
             or s.crossfade or s.normalize or s.volume != 1.0):
-        warnings.append("Resolution, frame rate, framing, text, music, fades, transitions and "
+        warnings.append("Resolution, frame rate, framing, layers, music, fades, transitions and "
                         "volume are ignored.")
     warnings.append("Cuts snap to the nearest keyframe, so they can be off by up to a few seconds.")
     return errors, warnings

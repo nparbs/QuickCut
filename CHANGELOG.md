@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Editing
+- **The player shows the output frame.** When you pick a shape (9:16, 1:1…), the player draws a box the shape of the export and dims everything outside it, so you can see exactly what gets cropped off. The blurred background shows inside the box when Fill is set to it.
+- **Zoom and move each clip.** Drag the picture in the player to move it, scroll to zoom (around the cursor), double-click to go back to the Fill setting. Under the player: a Zoom slider (10–400 %, where 100 % just fills the frame and lower values show bars or blur around the clip), **Fit**, **Fill**, **Centre**, **Reset** and **Apply to all**. Each clip keeps its own framing, the clip list shows "framed 120%", undo covers it and projects save it. The clip can't be pushed so far that a gap opens at the edge.
+- **Layers.** A new **Layers** tab next to Clips holds any number of text and picture layers, each with its own position, size, font, colour, box, opacity and timing (**⏱ Playhead** starts one where the playhead is). Drag them in the player, drag the corner handle or scroll over one to resize, restack them in the list (top is in front) and untick to hide. The player only shows a layer while the playhead is inside its time, and shows the selected one faintly otherwise. These replace the single text and logo in the export settings; projects that used them open with them turned into layers. Saved presets no longer include text or a logo.
+
+### Fixes
+- A thumbnail finishing just after the window closed could print an error.
+
 ## [0.3.1] - 2026-11-14
 
 Version 0.3.0 was tagged but never released; 0.3.1 has everything below plus a fix for target file size exports.

@@ -25,10 +25,10 @@ To open videos straight from Explorer, turn on **Tools → Add “Open with Quic
 - **Trim** each clip by dragging the yellow handles on the timeline (with filmstrip and waveform), typing times, or pressing **I** / **O** at the playhead.
 - **Split** at the playhead (S), **duplicate** (Ctrl+D), and drag clips to reorder them.
 - Per clip: **speed** 0.25×–4× (audio keeps its pitch), **rotate**, **mirror/flip**, **reverse**, **volume** (0–400 %) and **mute**.
-- **Framing**: 16:9, 9:16, 1:1, 4:5, 4:3 or 21:9, filled with black bars, cropped, or over a blurred copy of the video.
+- **Framing**: 16:9, 9:16, 1:1, 4:5, 4:3 or 21:9, filled with black bars, cropped, or over a blurred copy of the video. The player shows the output frame and dims what gets cropped off; drag a clip to move it and scroll to zoom, per clip.
 - **21 transitions** between clips (crossfade, dip to black, wipes, slides…), plus **fade in / out**.
 - **Background music** with its own volume, looping and a fade at the end.
-- **Text and logo** overlays with position, size, colour and timing.
+- **Layers**: any number of text and picture layers, dragged into place in the player, each with its own size, font, colour, opacity and timing.
 - **Undo / redo**, and **projects** (`.qcut`) you can save and reopen.
 
 **Export**
@@ -117,7 +117,10 @@ This writes `dist/QuickCut/` and a zip, after checking that the packaged app sta
 | `quickcut/main_window.py` | Clip list, player, editing, projects, undo, menus |
 | `quickcut/export_panel.py` | Export settings panel and presets |
 | `quickcut/media_cache.py` | Thumbnails, filmstrips and waveforms in the background |
-| `quickcut/overlays.py` | Renders text and logos to PNG overlays |
+| `quickcut/framing.py` | Clip zoom and position maths, shared by the player and the export |
+| `quickcut/player_view.py` | Player drawn as the output frame: framing, dimmed crop, layer dragging |
+| `quickcut/layers_panel.py` | Layers tab: list and settings for text and picture layers |
+| `quickcut/overlays.py` | Draws layers, for the player and as PNG overlays for export |
 | `packaging/` | Standalone build, icon and release notes |
 
 ## Roadmap

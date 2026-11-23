@@ -35,6 +35,11 @@ class Clip:
     reverse: bool = False
     volume: float = 1.0     # this clip's own audio, 0 - 4
     muted: bool = False
+    # Framing in the output (see framing.py): zoom 1 just fills the frame; None follows the
+    # export's Fill setting. pan_x/pan_y place the clip's centre, as a fraction of the frame.
+    zoom: float | None = None
+    pan_x: float = 0.5
+    pan_y: float = 0.5
 
     def __post_init__(self):
         if self.end <= 0:
@@ -62,6 +67,44 @@ class Clip:
     @property
     def has_audio_changes(self) -> bool:
         return self.muted or self.volume != 1.0
+
+    @property
+    def has_framing(self) -> bool:
+        return self.zoom is not None
+
+
+@dataclass
+class Layer:
+    """A text or picture laid over the whole edit, placed and sized relative to the frame."""
+    kind: str = "text"          # text | image
+    text: str = ""
+    image: str = ""
+    x: float = 0.5              # centre, as a fraction of the frame width / height
+    y: float = 0.85
+    size: float = 6.0           # text: line height in % of the short side; image: width in % of the frame
+    font: str = "Segoe UI"
+    bold: bool = True
+    color: str = "#ffffff"
+    box: bool = True            # dark box behind text
+    opacity: float = 1.0
+    start: float = 0.0          # seconds into the edit
+    duration: float = 0.0       # 0 shows it until the end
+    hidden: bool = False
+
+    @property
+    def end(self) -> float | None:
+        return self.start + self.duration if self.duration > 0 else None
+
+    @property
+    def label(self) -> str:
+        if self.kind == "text":
+            words = " ".join(self.text.split())
+            return f"T  {words[:40] or '(empty text)'}"
+        return f"🖼  {Path(self.image).name if self.image else '(no picture)'}"
+
+    @property
+    def empty(self) -> bool:
+        return not (self.text.strip() if self.kind == "text" else self.image)
 
 
 @dataclass

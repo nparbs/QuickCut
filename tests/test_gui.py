@@ -135,8 +135,9 @@ def test_clip_effects_and_preset_export_with_overlays(win, media, monkeypatch):
     p.platform.setCurrentText("Shorts / Reels / TikTok (9:16)")
     assert p.aspect.currentData() == "9:16" and p.fit.currentData() == "blur"
     assert "1080×1920" in p.summary.text()
-    p.text.setPlainText("Hello\nQuickCut")
-    p.logo.set_path(media["logo"])
+    win.layers_panel.add_text()
+    win.layers_panel.text.setPlainText("Hello\nQuickCut")
+    win.layers_panel.add_image(media["logo"])
     p.transition_on.setChecked(True)
     p.fade_out.setValue(0.5)
     assert p.platform.currentText() == "Custom"  # changing anything leaves the preset
@@ -212,7 +213,7 @@ def test_nothing_to_autosave_writes_nothing(win):
 
 def test_saved_presets(win, app, monkeypatch):
     panel = win.panel
-    panel.set_state({"format": ".mkv", "mode": "size", "size_mb": 77.0, "text": "hello"})
+    panel.set_state({"format": ".mkv", "mode": "size", "size_mb": 77.0, "fade_in": 1.5})
     monkeypatch.setattr(ep.QInputDialog, "getText", staticmethod(lambda *a, **k: ("  My clips ", True)))
     panel._ask_save_preset()
     assert panel.platform.currentText() == "My clips"
@@ -223,7 +224,7 @@ def test_saved_presets(win, app, monkeypatch):
     assert panel.size_mb.value() == 10.0 and not panel.delete_preset_btn.isEnabled()
     panel.platform.setCurrentText("My clips")
     state = panel.get_state()
-    assert (state["format"], state["size_mb"], state["text"]) == (".mkv", 77.0, "hello")
+    assert (state["format"], state["size_mb"], state["fade_in"]) == (".mkv", 77.0, 1.5)
 
     # Saved across restarts, along with which preset was selected.
     q = mw.app_settings()
@@ -268,7 +269,7 @@ def test_damaged_saved_presets_are_ignored(app):
 def test_export_each_clip_separately(win, media, monkeypatch):
     out_dir = tempfile.mkdtemp(prefix="quickcut_batch_")
     win.add_files([media["a"], media["b"], media["a"]])
-    win.panel.set_state({"format": ".mkv", "mode": "preset", "aspect": "", "text": "", "logo": ""})
+    win.panel.set_state({"format": ".mkv", "mode": "preset", "aspect": ""})
     monkeypatch.setattr(mw.QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: out_dir))
     win.export_separately()
     assert len(win.queue.jobs) == 3
@@ -281,7 +282,7 @@ def test_split_into_parts(win, media, monkeypatch):
     from quickcut import split_dialog as sd
     out_dir = tempfile.mkdtemp(prefix="quickcut_parts_")
     win.add_files([media["a"]])   # 4 s
-    win.panel.set_state({"format": ".mkv", "mode": "preset", "aspect": "", "text": "", "logo": ""})
+    win.panel.set_state({"format": ".mkv", "mode": "preset", "aspect": ""})
     monkeypatch.setattr(mw.QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: out_dir))
 
     def run(start, seconds, most, preset):
@@ -349,7 +350,8 @@ def test_preview_render(win, media, monkeypatch):
     monkeypatch.setattr(mw, "PreviewDialog", lambda path, parent: type(
         "D", (), {"show": lambda self: shown.append(path)})())
     win.add_files([media["a"], media["b"]])
-    win.panel.set_state({"transition_on": True, "text": "Preview", "format": ".mp4", "mode": "size"})
+    win.panel.set_state({"transition_on": True, "format": ".mp4", "mode": "size"})
+    win.layers_panel.add_text()
     win.preview_edit()
     wait_for(lambda: shown, timeout=60)
     info = probe(TOOLS, shown[0])
@@ -361,7 +363,7 @@ def test_gif_and_audio_formats_from_ui(win, media, monkeypatch):
     win.add_files([media["a"]])
     for ext in (".gif", ".mp3"):
         out = os.path.join(media["dir"], f"ui_out{ext}")
-        win.panel.set_state({"format": ext, "text": "", "logo": "", "resolution": 240})
+        win.panel.set_state({"format": ext, "resolution": 240})
         monkeypatch.setattr(mw.QFileDialog, "getSaveFileName", staticmethod(lambda *a, o=out, **k: (o, "")))
         win.export()
         _run_queue(win)
@@ -419,3 +421,91 @@ def test_simultaneous_launches_open_one_window(app, tmp_path):
     outputs = sorted(p.communicate(timeout=60)[0].strip() for p in procs)
     # One window; the other three launches hand their files to it over the pipe.
     assert outputs == ["handed-off"] * 3 + ["primary 3"], outputs
+
+
+def test_framing_in_the_player(win, media):
+    from quickcut.framing import fit_zoom
+    win.add_files([media["a"]])      # 1280x720
+    win.panel.set_state({"aspect": "9:16", "fit": "pad", "mode": "preset", "format": ".mp4", "resolution": 0})
+    clip = win._ordered()[0]
+    assert win.view._frame == (720, 1280) and win.framing_row.isVisible()
+    assert "(auto)" in win.zoom_label.text()
+    # Dragging in the player moves the clip; the end of the drag is one undo step.
+    for x in (0.4, 0.3, 0.2):
+        win.view.framingEdited.emit(1.0, x, 0.5, False)
+    win.view.framingEdited.emit(1.0, 0.2, 0.5, True)
+    assert clip.zoom == 1.0 and clip.pan_x == 0.2
+    assert "framed 100%" in win.list.item(0).text()
+    win.undo()
+    assert win._ordered()[0].zoom is None
+    win.redo()
+    win._frame_fit()
+    clip = win._ordered()[0]
+    assert abs(clip.zoom - fit_zoom(1280, 720, 720, 1280)) < 1e-9 and clip.pan_x == 0.5
+    win.view.framingResetRequested.emit()     # double-click
+    assert win._ordered()[0].zoom is None
+    # No re-encode can't frame, so the player goes back to showing the plain clip.
+    win.panel.set_state({"mode": "copy"})
+    assert win.view._frame is None and not win.framing_row.isVisible()
+
+
+def test_framed_export_from_ui(win, media, monkeypatch):
+    win.add_files([media["a"], media["b"]])
+    win.panel.set_state({"aspect": "1:1", "fit": "blur", "mode": "preset", "format": ".mp4", "resolution": 360})
+    win.list.setCurrentRow(1)
+    win._set_framing(1.6, (0.3, 0.6))
+    win._framing_to_all()
+    assert all(c.zoom == 1.6 for c in win._ordered())
+    out = os.path.join(media["dir"], "gui_framed.mp4")
+    monkeypatch.setattr(mw.QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (out, "")))
+    win.export()
+    _run_queue(win)
+    assert win.queue.jobs[-1].status == DONE, win.queue.jobs[-1].detail
+    info = probe(TOOLS, out)
+    assert (info.width, info.height) == (360, 360)
+
+
+def test_layers_edit_undo_and_save(win, media, monkeypatch):
+    lp = win.layers_panel
+    win.add_files([media["a"]])
+    lp.add_text()
+    lp.text.setPlainText("Title")
+    lp.add_image(media["logo"])
+    assert [layer.kind for layer in win.layers] == ["text", "image"]
+    assert lp.list.item(0).text().endswith("logo.png")     # front layer listed first
+    # Dragging a layer in the player.
+    win.layers[1].x = 0.25
+    win.view.layerEdited.emit(1, 0.25, 0.85, 18.0, True)
+    win.undo()
+    assert win.layers[1].x == 0.82
+    lp.move(-1)                                          # send the picture behind the text
+    assert [layer.kind for layer in win.layers] == ["image", "text"]
+    lp.select(1)
+    lp.start.setValue(1.0)
+    lp.duration.setValue(1.0)
+    monkeypatch.setattr(win, "_playhead", lambda: 0.5)
+    win._update_layer_times()
+    assert win.view._layer_active == [True, False]
+    path = os.path.join(media["dir"], "layers.qcut")
+    monkeypatch.setattr(mw.QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (path, "")))
+    assert win.save_project_as()
+    saved = list(win.layers)
+    win.new_project()
+    assert win.layers == [] and lp.list.count() == 0
+    win.open_project(path)
+    assert win.layers == saved and lp.list.count() == 2
+    lp.select(0)
+    win.left_tabs.setCurrentIndex(1)
+    win._delete_key()
+    assert len(win.layers) == 1 and win.list.count() == 1   # Delete on the Layers tab removes the layer
+
+
+def test_old_project_text_becomes_a_layer(win, media):
+    import json
+    path = os.path.join(media["dir"], "old.qcut")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"app": "QuickCut", "format": 1, "clips": [{"path": media["a"]}],
+                   "export": {"text": "Old caption", "text_pos": "top", "logo": media["logo"]}}, f)
+    win.open_project(path)
+    assert [layer.kind for layer in win.layers] == ["image", "text"]
+    assert win.layers[1].text == "Old caption"

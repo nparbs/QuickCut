@@ -16,7 +16,8 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDockWidget, QDoubleSpinBox,
     QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
-    QProgressDialog, QPushButton, QSpinBox, QSplitter, QStyle, QToolButton, QVBoxLayout, QWidget,
+    QProgressDialog, QPushButton, QSlider, QSpinBox, QSplitter, QStyle, QTabWidget, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from . import __version__, shell_integration
@@ -28,14 +29,18 @@ from .config import app_settings, autosave_path
 from .export_panel import FORMATS, ExportPanel
 from .exporter import ExportRunner
 from .ffmpeg import ENCODERS, FFmpegError, Tools, detect_encoders, probe
+from .framing import MAX_ZOOM, MIN_ZOOM, clamp_pan, clip_zoom, fit_zoom
 from .jobs import DONE, FAILED, Job, JobQueue, JobsPanel
 from .media_cache import MediaCache
-from .models import Clip, ExportSettings, Overlay
-from .overlays import render_logo, render_text
+from .layers_panel import LayersPanel
+from .models import Clip, ExportSettings, Layer, Overlay
+from .overlays import layers_from_old_settings, render_layer
 from .player_view import PlayerView
 from .preview_dialog import PreviewDialog
 from .split_dialog import CURRENT, MAX_PARTS, PARTS_INDEX, SplitDialog, part_filename, write_parts_index
-from .project import autosave_origin, PROJECT_EXT, apply_clip_fields, load_project, save_project
+from .project import (
+    PROJECT_EXT, apply_clip_fields, autosave_origin, load_layers, load_project, save_project,
+)
 from .theme import THEMES, apply_theme
 from .trim_bar import TrimBar
 from .updates import RELEASES_PAGE, UpdateChecker
@@ -47,6 +52,9 @@ SPEEDS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
 MAX_RECENT = 8
 HISTORY_LIMIT = 200
 COALESCE_SECONDS = 1.5
+# Edits that come in bursts (dragging, typing, scrolling) join into one undo step.
+COALESCE_KEYS = {"trim", "speed", "volume", "zoom", "layer-text", "layer-size", "layer-opacity",
+                 "layer-time"}
 PREVIEW_SHORT_SIDE = 360
 
 
@@ -117,6 +125,7 @@ class MainWindow(QMainWindow):
         self.tools = tools
         self.qsettings = app_settings()
         self.clips: dict[int, Clip] = {}
+        self.layers: list[Layer] = []
         self._next_id = 0
         self._current: int | None = None
         self._pending_seek: float | None = None
@@ -171,7 +180,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.splitter)
         st = self.style()
 
-        # Left: clip list
+        # Left: clip list and layers, in tabs
+        self.left_tabs = QTabWidget()
         left = QWidget()
         lv = QVBoxLayout(left)
         title = QLabel("<b>Clips</b> — played top to bottom, drag to reorder")
@@ -206,12 +216,27 @@ class MainWindow(QMainWindow):
         self.total_label = QLabel()
         self.total_label.setWordWrap(True)
         lv.addWidget(self.total_label)
-        self.splitter.addWidget(left)
+        self.left_tabs.addTab(left, "Clips")
+        self.layers_panel = LayersPanel()
+        self.layers_panel.set_layers(self.layers)
+        self.layers_panel.playhead = self._edit_time
+        self.layers_panel.changed.connect(self._layers_changed)
+        self.layers_panel.selectionChanged.connect(self._layer_selected)
+        lw = QWidget()
+        QVBoxLayout(lw).addWidget(self.layers_panel)
+        self.left_tabs.addTab(lw, "Layers")
+        self.splitter.addWidget(self.left_tabs)
 
         # Middle: preview, trimming, clip effects
         mid = QWidget()
         mv = QVBoxLayout(mid)
         self.view = PlayerView()
+        self.view.setToolTip("Drag the picture to move it, scroll to zoom, double-click to reset. "
+                             "Drag text and pictures to place them; scroll over the selected one to resize.")
+        self.view.framingEdited.connect(self._framing_edited)
+        self.view.framingResetRequested.connect(lambda: self._set_framing(None))
+        self.view.layerSelected.connect(self._layer_picked_in_view)
+        self.view.layerEdited.connect(self._layer_edited_in_view)
         mv.addWidget(self.view, 1)
         self.drop_hint = QLabel("Drop videos or a project here, or click <b>Add</b> to get started")
         self.drop_hint.setAlignment(Qt.AlignCenter)
@@ -334,9 +359,52 @@ class MainWindow(QMainWindow):
         row.addWidget(self.clip_mute)
         row.addStretch()
         mv.addLayout(row)
+
+        self.framing_row = QWidget()
+        row = QHBoxLayout(self.framing_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        framing_label = QLabel("<b>Framing:</b>")
+        framing_label.setToolTip("Drag the picture in the player to move it, scroll to zoom, "
+                                 "double-click to reset")
+        row.addWidget(framing_label)
+        self.zoom_slider = QSlider(Qt.Horizontal)
+        self.zoom_slider.setRange(round(MIN_ZOOM * 100), round(MAX_ZOOM * 100))
+        self.zoom_slider.setFixedWidth(160)
+        self.zoom_slider.setToolTip("100 % just fills the frame. Lower shows the whole clip with bars or "
+                                    "blur around it; higher zooms in. You can also scroll over the player.")
+        self.zoom_slider.valueChanged.connect(self._zoom_slider_changed)
+        row.addWidget(self.zoom_slider)
+        self.zoom_label = QLabel()
+        self.zoom_label.setMinimumWidth(70)
+        row.addWidget(self.zoom_label)
+        self.fit_btn = QToolButton()
+        self.fit_btn.setText("Fit")
+        self.fit_btn.setToolTip("Show the whole clip inside the frame")
+        self.fit_btn.clicked.connect(self._frame_fit)
+        self.fill_btn = QToolButton()
+        self.fill_btn.setText("Fill")
+        self.fill_btn.setToolTip("Fill the frame, cropping what doesn't fit")
+        self.fill_btn.clicked.connect(lambda: self._set_framing(1.0))
+        self.centre_btn = QToolButton()
+        self.centre_btn.setText("Centre")
+        self.centre_btn.setToolTip("Put the clip back in the middle")
+        self.centre_btn.clicked.connect(self._frame_centre)
+        self.frame_reset_btn = QToolButton()
+        self.frame_reset_btn.setText("Reset")
+        self.frame_reset_btn.setToolTip("Go back to the export's Fill setting (double-click the player)")
+        self.frame_reset_btn.clicked.connect(lambda: self._set_framing(None))
+        self.frame_copy_btn = QToolButton()
+        self.frame_copy_btn.setText("Apply to all")
+        self.frame_copy_btn.setToolTip("Give every clip this clip's zoom and position")
+        self.frame_copy_btn.clicked.connect(self._framing_to_all)
+        for b in (self.fit_btn, self.fill_btn, self.centre_btn, self.frame_reset_btn, self.frame_copy_btn):
+            row.addWidget(b)
+        row.addStretch()
+        mv.addWidget(self.framing_row)
         self.clip_controls = [self.trim, self.start_spin, self.end_spin, set_start, set_end, reset,
                               self.play_btn, self.speed, rot_left, rot_right, self.hflip, self.vflip,
-                              self.reverse, self.clip_volume, self.clip_mute, *self.step_buttons]
+                              self.reverse, self.clip_volume, self.clip_mute, *self.step_buttons,
+                              self.framing_row]
         self.splitter.addWidget(mid)
 
         # Right: export settings
@@ -463,7 +531,7 @@ class MainWindow(QMainWindow):
                           ("Shift+Right", lambda: self.step(1, seconds=True)),
                           ("Home", lambda: self._seek(self._clip().start if self._clip() else 0)),
                           ("End", lambda: self._seek(self._clip().end if self._clip() else 0)),
-                          ("Delete", self.remove_clip), ("Ctrl+Shift+Z", self.redo)):
+                          ("Delete", self._delete_key), ("Ctrl+Shift+Z", self.redo)):
             QShortcut(QKeySequence(key), self, activated=slot)
 
     def _show_shortcuts(self):
@@ -475,7 +543,7 @@ class MainWindow(QMainWindow):
             "Home / End — jump to start / end of the trim\n"
             "S — split the clip at the playhead\n"
             "Ctrl+D — duplicate the clip\n"
-            "Delete — remove the selected clip\n"
+            "Delete — remove the selected clip (or layer, on the Layers tab)\n"
             "Ctrl+Z / Ctrl+Y — undo / redo\n"
             "Ctrl+O — add videos\n"
             "Ctrl+S — save project\n"
@@ -644,6 +712,7 @@ class MainWindow(QMainWindow):
             self.length_label.setText("")
             self.time_label.setText("0:00.000 / 0:00.000")
             self.view.set_orientation(0, False, False)
+            self._update_view()
             return
         for spin in (self.start_spin, self.end_spin):
             spin.blockSignals(True)
@@ -687,6 +756,7 @@ class MainWindow(QMainWindow):
         self.audio.setVolume(0.0 if clip.muted else min(1.0, clip.volume))
         self.player.setPlaybackRate(clip.speed)
         self.view.set_orientation(clip.rotate, clip.hflip, clip.vflip)
+        self._update_view()
         extra = f" → {fmt_time(clip.out_length)} at {clip.speed:g}×" if clip.speed != 1 else ""
         self.length_label.setText(f"Selection: <b>{fmt_time(clip.length)}</b>{extra}")
 
@@ -719,6 +789,139 @@ class MainWindow(QMainWindow):
             setattr(clip, name, on)
             self._sync_clip_widgets()
             self._changed(name)
+
+    # == framing ===================================================================================
+
+    def _framing_settings(self) -> tuple[ExportSettings, bool]:
+        """(current settings, whether the player should show the output frame)."""
+        s = self.panel.settings()
+        s.output = "x" + self.panel.extension
+        framed = output_kind(s.output) in ("video", "gif", "webp") and s.mode != "copy"
+        return s, framed
+
+    def _update_view(self):
+        clip = self._clip()
+        clips = self._ordered()
+        s, framed = self._framing_settings()
+        self.framing_row.setVisible(framed)
+        if clip is None or not clips:
+            self.view.set_frame(None)
+            self.view.set_layers([], -1)
+            return
+        frame = output_frame(clips, s) if framed else None
+        self.view.set_frame(frame, clip.display_size, s.fit)
+        self.view.set_framing(clip.zoom, clip.pan_x, clip.pan_y)
+        self.view.set_background(self.cache.get("thumb", clip.info) if s.fit == "blur" else None)
+        self.view.set_layers(self.layers, self.layers_panel.selected)
+        self._update_layer_times()
+        if frame:
+            zoom = clip_zoom(clip.zoom, s.fit, *clip.display_size, *frame)
+            self.zoom_slider.blockSignals(True)
+            self.zoom_slider.setValue(round(zoom * 100))
+            self.zoom_slider.blockSignals(False)
+            self.zoom_label.setText(f"{zoom:.0%}" + ("" if clip.has_framing else " (auto)"))
+            self.frame_reset_btn.setEnabled(clip.has_framing)
+            self.frame_copy_btn.setEnabled(len(clips) > 1)
+
+    def _set_framing(self, zoom: float | None, pan: tuple[float, float] | None = None, key: str = "framing"):
+        clip = self._clip()
+        if clip is None:
+            return
+        if zoom is None:
+            clip.zoom, clip.pan_x, clip.pan_y = None, 0.5, 0.5
+        else:
+            s, _ = self._framing_settings()
+            frame = output_frame(self._ordered(), s)
+            clip.zoom = zoom
+            px, py = pan if pan is not None else (clip.pan_x, clip.pan_y)
+            clip.pan_x, clip.pan_y = clamp_pan(*clip.display_size, *frame, zoom, px, py)
+        self._changed(key)
+
+    def _frame_fit(self):
+        clip = self._clip()
+        if clip is None:
+            return
+        s, _ = self._framing_settings()
+        self._set_framing(fit_zoom(*clip.display_size, *output_frame(self._ordered(), s)), (0.5, 0.5))
+
+    def _frame_centre(self):
+        if self._clip() is not None:
+            self._set_framing(self.view.resolved_zoom(), (0.5, 0.5))
+
+    def _zoom_slider_changed(self, value: int):
+        self._set_framing(value / 100, key="zoom")
+
+    def _framing_edited(self, zoom: float, pan_x: float, pan_y: float, finished: bool):
+        clip = self._clip()
+        if clip is None:
+            return
+        clip.zoom, clip.pan_x, clip.pan_y = zoom, pan_x, pan_y
+        self.zoom_slider.blockSignals(True)
+        self.zoom_slider.setValue(round(zoom * 100))
+        self.zoom_slider.blockSignals(False)
+        self.zoom_label.setText(f"{zoom:.0%}")
+        if finished:
+            self._changed("framing")
+
+    def _framing_to_all(self):
+        clip = self._clip()
+        if clip is None:
+            return
+        for other in self.clips.values():
+            other.zoom, other.pan_x, other.pan_y = clip.zoom, clip.pan_x, clip.pan_y
+        self._changed("framing-all")
+        self.statusBar().showMessage("Every clip now uses this framing.", 4000)
+
+    # == layers ====================================================================================
+
+    def _edit_time(self) -> float:
+        """Where the playhead is in the whole edit (layers are timed against that)."""
+        clip = self._clip()
+        if clip is None:
+            return 0.0
+        clips = self._ordered()
+        s, _ = self._framing_settings()
+        crossfade = effective_crossfade(clips, s)
+        offset = 0.0
+        for c in clips:
+            if c is clip:
+                break
+            offset += c.out_length - crossfade
+        pos = min(max(self._playhead(), clip.start), clip.end)
+        into = (clip.end - pos) if clip.reverse else (pos - clip.start)
+        return offset + into / clip.speed
+
+    def _update_layer_times(self):
+        if not self.layers:
+            return
+        t = self._edit_time()
+        self.view.set_layer_active([layer.start <= t + 1e-3 and (layer.end is None or t < layer.end)
+                                    for layer in self.layers])
+
+    def _layers_changed(self, key: str):
+        self.view.set_layers(self.layers, self.layers_panel.selected)
+        self._update_layer_times()
+        self._changed(key)
+
+    def _layer_selected(self, index: int):
+        self.view.set_layers(self.layers, index)
+        self._update_layer_times()
+
+    def _layer_picked_in_view(self, index: int):
+        self.layers_panel.select(index)
+        if index >= 0:
+            self.left_tabs.setCurrentIndex(1)
+
+    def _layer_edited_in_view(self, index: int, _x: float, _y: float, _size: float, finished: bool):
+        if finished:
+            self.layers_panel.sync_from_model()
+            self._changed("layer")
+
+    def _delete_key(self):
+        if self.left_tabs.currentIndex() == 1:
+            self.layers_panel.delete()
+        else:
+            self.remove_clip()
 
     # == trimming ==================================================================================
 
@@ -784,6 +987,7 @@ class MainWindow(QMainWindow):
         pos = ms / 1000
         self.trim.set_position(pos)
         self.time_label.setText(f"{fmt_time(pos)} / {fmt_time(clip.info.duration)}")
+        self._update_layer_times()
         if self.player.playbackState() == QMediaPlayer.PlayingState and pos >= clip.end:
             if self.loop.isChecked():
                 self._seek(clip.start)
@@ -811,7 +1015,9 @@ class MainWindow(QMainWindow):
                     item.setIcon(icon)
         clip = self._clip()
         if clip is not None and clip.info.path == path:
-            if kind == "strip":
+            if kind == "thumb":
+                self._update_view()   # the blurred-background preview uses the thumbnail
+            elif kind == "strip":
                 self.trim.set_images(filmstrip=image)
             elif kind == "wave":
                 self.trim.set_images(waveform=image)
@@ -820,13 +1026,15 @@ class MainWindow(QMainWindow):
 
     def _snapshot(self) -> tuple:
         ids = [self.list.item(i).data(CLIP_ID) for i in range(self.list.count())]
-        return tuple((cid, replace(self.clips[cid])) for cid in ids), self._current
+        return (tuple((cid, replace(self.clips[cid])) for cid in ids), self._current,
+                tuple(replace(layer) for layer in self.layers), self.layers_panel.selected)
 
     @staticmethod
     def _same(a: tuple | None, b: tuple | None) -> bool:
         def key(snap):
-            return tuple((cid, c.info.path, c.start, c.end, c.speed, c.rotate, c.hflip, c.vflip, c.reverse,
-                          c.volume, c.muted) for cid, c in snap[0])
+            clips = tuple((cid, c.info.path, c.start, c.end, c.speed, c.rotate, c.hflip, c.vflip,
+                           c.reverse, c.volume, c.muted, c.zoom, c.pan_x, c.pan_y) for cid, c in snap[0])
+            return clips, snap[2]
         return a is not None and b is not None and key(a) == key(b)
 
     def _changed(self, key: str):
@@ -838,7 +1046,7 @@ class MainWindow(QMainWindow):
         if self._same(snap, self._committed):
             return
         now = time.monotonic()
-        coalesce = (key in ("trim", "speed", "volume") and key == self._last_key
+        coalesce = (key in COALESCE_KEYS and key == self._last_key
                     and now - self._last_time < COALESCE_SECONDS)
         if not coalesce and self._committed is not None:
             self._undo.append(self._committed)
@@ -850,7 +1058,7 @@ class MainWindow(QMainWindow):
         self._update_undo_actions()
 
     def _restore(self, snap: tuple):
-        order, current = snap
+        order, current, layers, layer_sel = snap
         self._restoring = True
         try:
             self.list.blockSignals(True)
@@ -866,6 +1074,8 @@ class MainWindow(QMainWindow):
             if select is not None:
                 self.list.setCurrentItem(select)
             self.list.blockSignals(False)
+            self.layers[:] = [replace(layer) for layer in layers]
+            self.layers_panel.set_layers(self.layers, layer_sel)
             self._select_current()
             self._refresh()
         finally:
@@ -903,7 +1113,8 @@ class MainWindow(QMainWindow):
         if not self._dirty:
             return
         try:
-            save_project(autosave_path(), self._ordered(), self.panel.get_state(), autosave_of=self.project_path)
+            save_project(autosave_path(), self._ordered(), self.panel.get_state(), autosave_of=self.project_path,
+                         layers=self.layers)
         except OSError:
             pass  # autosave is a safety net; never interrupt editing over it
 
@@ -972,6 +1183,8 @@ class MainWindow(QMainWindow):
     def new_project(self):
         if not self._confirm_discard():
             return
+        self.layers.clear()
+        self.layers_panel.set_layers(self.layers)
         self._replace_clips([])
         self.project_path = None
         self._reset_history()
@@ -991,6 +1204,7 @@ class MainWindow(QMainWindow):
             return
         try:
             entries, export_state = load_project(path)
+            layers = load_layers(path)
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "Couldn't open project", str(exc))
             return
@@ -1010,6 +1224,10 @@ class MainWindow(QMainWindow):
                 clips.append(clip)
         finally:
             QApplication.restoreOverrideCursor()
+        if layers is None:   # saved by 0.3 or earlier: one text and one logo in the export settings
+            layers = layers_from_old_settings(export_state)
+        self.layers[:] = layers
+        self.layers_panel.set_layers(self.layers)
         self._replace_clips(clips)
         self.panel.set_state(export_state)
         self.project_path = path
@@ -1027,7 +1245,7 @@ class MainWindow(QMainWindow):
         if not self.project_path:
             return self.save_project_as()
         try:
-            save_project(self.project_path, self._ordered(), self.panel.get_state())
+            save_project(self.project_path, self._ordered(), self.panel.get_state(), layers=self.layers)
         except OSError as exc:
             QMessageBox.warning(self, "Couldn't save project", str(exc))
             return False
@@ -1089,6 +1307,8 @@ class MainWindow(QMainWindow):
                 tags.append("flipped")
             if c.reverse:
                 tags.append("reversed")
+            if c.has_framing:
+                tags.append(f"framed {c.zoom:.0%}")
             if c.muted and c.info.has_audio:
                 tags.append("muted")
             elif c.volume != 1 and c.info.has_audio:
@@ -1107,6 +1327,7 @@ class MainWindow(QMainWindow):
         self._refresh_summary()
 
     def _refresh_summary(self):
+        self._update_view()
         clips = self._ordered()
         if not clips:
             self.panel.summary.setText("<i>Add a clip to see the output details.</i>")
@@ -1176,24 +1397,18 @@ class MainWindow(QMainWindow):
             return None
         return clips
 
-    def _plan_with_overlays(self, clips: list[Clip], s: ExportSettings,
-                            spec: dict) -> tuple[ExportPlan, str | None]:
-        """Build the plan, rendering text/logo overlays at the final frame size first."""
+    def _plan_with_overlays(self, clips: list[Clip], s: ExportSettings) -> tuple[ExportPlan, str | None]:
+        """Build the plan, rendering the layers at the final frame size first."""
         plan = build_plan(self.tools.ffmpeg, clips, s)
-        if s.mode == "copy" or output_kind(s.output) == "audio" or not (spec["text"] or spec["logo"]):
+        layers = [layer for layer in self.layers if not layer.hidden and not layer.empty]
+        if s.mode == "copy" or output_kind(s.output) == "audio" or not layers:
             return plan, None
         temp_dir = tempfile.mkdtemp(prefix="quickcut_overlay_")
         try:
             overlays = []
-            if spec["logo"]:
-                path = render_logo(os.path.join(temp_dir, "logo.png"), plan.width, plan.height, spec["logo"],
-                                   spec["logo_pos"], spec["logo_size"], spec["logo_opacity"])
-                overlays.append(Overlay(path))
-            if spec["text"]:
-                path = render_text(os.path.join(temp_dir, "text.png"), plan.width, plan.height, spec["text"],
-                                   spec["text_pos"], spec["text_size"], spec["text_color"], spec["text_box"])
-                end = spec["text_start"] + spec["text_duration"] if spec["text_duration"] > 0 else None
-                overlays.append(Overlay(path, spec["text_start"], end))
+            for k, layer in enumerate(layers):
+                path = render_layer(os.path.join(temp_dir, f"layer{k}.png"), layer, plan.width, plan.height)
+                overlays.append(Overlay(path, layer.start, layer.end))
             return build_plan(self.tools.ffmpeg, clips, replace(s, overlays=overlays)), temp_dir
         except Exception:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1204,7 +1419,7 @@ class MainWindow(QMainWindow):
         s = panel.settings()
         s.output = output
         try:
-            plan, temp_dir = self._plan_with_overlays(clips, s, panel.overlay_spec())
+            plan, temp_dir = self._plan_with_overlays(clips, s)
         except ValueError as exc:
             QMessageBox.warning(self, "QuickCut", str(exc))
             return False
@@ -1412,8 +1627,7 @@ class MainWindow(QMainWindow):
             return
         out = os.path.join(tempfile.gettempdir(), f"quickcut_preview_{os.getpid()}_{int(time.time())}.mp4")
         try:
-            plan, temp_dir = self._plan_with_overlays(clips, self.preview_settings(out),
-                                                      self.panel.overlay_spec())
+            plan, temp_dir = self._plan_with_overlays(clips, self.preview_settings(out))
         except ValueError as exc:
             QMessageBox.warning(self, "QuickCut", str(exc))
             return

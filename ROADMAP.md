@@ -73,8 +73,7 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 - **Variable frame rate** sources (such as phone recordings) are converted to a constant frame rate.
 - **HDR** is always converted to SDR; there's no option to keep 10-bit HDR output yet.
 - Transitions use **one style and length** for every cut; you can't choose per cut.
-- Crop always keeps the **centre** of the frame; you can't move the crop area.
-- The live player doesn't show **reverse, framing, text, music or transitions**; use Preview edit for those.
+- The live player doesn't show **reverse, music or transitions**; use Preview edit for those. Its blurred background is a still, not the moving video.
 - Animated **WebP** files can't be opened in QuickCut itself (FFmpeg can't decode them).
 - **No re-encode** mode cuts on keyframes, so cuts can be off by up to a few seconds. This includes Split into parts, where parts can come out the wrong length or overlap.
 - **Split into parts** cuts at fixed lengths only, and each clip is split on its own.
@@ -84,11 +83,13 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 ## Future ideas
 
 ### Editing
+- [ ] Video layers: picture-in-picture (facecam) and stacked split-screen for Shorts
+- [ ] Animate framing over a clip (pan and zoom, Ken Burns)
 - [ ] Per-cut transition style and length
-- [ ] Drag to position the crop area; per-clip crop
+- [x] Drag to position the crop area; per-clip crop (zoom and move each clip in the player)
 - [ ] Freeze frame and still-image clips (photos in a slideshow)
 - [ ] Subtitles: burn in `.srt` files
-- [ ] Multiple text overlays, each with its own timing
+- [x] Multiple text overlays, each with its own timing (Layers tab)
 - [ ] Speed ramps and a smoother reverse for long clips
 
 ### Export
@@ -100,7 +101,7 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 - [ ] Optional first-frame image (PNG) saved with each part, for image-to-video workflows
 
 ### Usability
-- [ ] Live preview of framing and text in the player
+- [x] Live preview of framing and text in the player
 - [ ] Timeline view with clip widths proportional to length
 - [ ] Zoomable timeline for precise trims on long videos
 

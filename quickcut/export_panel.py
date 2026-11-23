@@ -19,7 +19,6 @@ from .command import TRANSITIONS, TWO_PASS_FAMILIES, codec_allowed, output_kind
 from .config import app_settings
 from .ffmpeg import CODEC_LABELS, CODEC_TIPS, ENCODERS, Encoder
 from .models import ExportSettings
-from .overlays import POSITIONS
 from .presets import PLATFORM_PRESETS, preset_state
 from .widgets import ColorButton, FilePicker, Section
 
@@ -105,8 +104,7 @@ class ExportPanel(QWidget):
         self.platform.setToolTip("Sets everything below for a common destination. "
                                  "Change anything afterwards and it becomes Custom.")
         self.save_preset_btn = QPushButton("Save…")
-        self.save_preset_btn.setToolTip("Save all the settings below as your own preset, "
-                                        "including any text overlay and logo")
+        self.save_preset_btn.setToolTip("Save all the settings below as your own preset")
         self.save_preset_btn.clicked.connect(self._ask_save_preset)
         self.delete_preset_btn = QPushButton("Delete")
         self.delete_preset_btn.setToolTip("Delete this saved preset")
@@ -154,7 +152,8 @@ class ExportPanel(QWidget):
         self.aspect = self._reg("aspect", _combo(ASPECTS))
         self.fit = self._reg("fit", _combo(FITS))
         self.fit.setToolTip("What happens when a clip's shape doesn't match the output: black bars, "
-                            "cropping the edges off, or a blurred copy of the video behind it.")
+                            "cropping the edges off, or a blurred copy of the video behind it. This is where each "
+                            "clip starts; drag or scroll in the player to frame a clip yourself.")
         sec.add("Shape", self.aspect)
         sec.add("Fill", self.fit)
         body.addWidget(sec)
@@ -269,40 +268,6 @@ class ExportPanel(QWidget):
         sec.add("Fade out", self.fade_out)
         body.addWidget(sec)
 
-        # Text & logo
-        self.sec_text = sec = Section("Text and logo", expanded=False)
-        self.text = self._reg("text", QPlainTextEdit())
-        self.text.setPlaceholderText("Caption or title (optional)")
-        self.text.setFixedHeight(self.text.fontMetrics().lineSpacing() * 3 + 12)
-        self.text_pos = self._reg("text_pos", _combo(POSITIONS))
-        self.text_size = self._reg("text_size", _spin(2, 25, 6, 0.5, 1, " %"))
-        self.text_size.setToolTip("Text height as a percentage of the video's short side")
-        self.text_color = self._reg("text_color", ColorButton("#ffffff"))
-        self.text_box = self._reg("text_box", QCheckBox("Dark box behind text"))
-        self.text_box.setChecked(True)
-        self.text_start = self._reg("text_start", _spin(0, 36000, 0, 0.5, 1, " s"))
-        self.text_duration = self._reg("text_duration", _spin(0, 36000, 0, 0.5, 1, " s"))
-        self.text_duration.setSpecialValueText("Until the end")
-        self.logo = self._reg("logo", FilePicker("Choose logo", "Images (*.png *.jpg *.jpeg *.webp *.bmp)"))
-        self.logo_pos = self._reg("logo_pos", _combo(POSITIONS))
-        _select(self.logo_pos, "bottom-right")
-        self.logo_size = self._reg("logo_size", _spin(2, 60, 15, 1, 0, " %"))
-        self.logo_size.setToolTip("Logo width as a percentage of the video width")
-        self.logo_opacity = self._reg("logo_opacity", QSlider(Qt.Horizontal))
-        self.logo_opacity.setRange(10, 100)
-        self.logo_opacity.setValue(85)
-        sec.add("Text", self.text)
-        sec.add("Position", self.text_pos)
-        sec.add("Size", self.text_size)
-        sec.add("Colour", self.text_color)
-        sec.add("", self.text_box)
-        sec.add("Show from", self.text_start)
-        sec.add("for", self.text_duration)
-        sec.add("Logo", self.logo)
-        sec.add("Position", self.logo_pos)
-        sec.add("Size", self.logo_size)
-        sec.add("Opacity", self.logo_opacity)
-        body.addWidget(sec)
         body.addStretch()
 
         scroll = QScrollArea()
@@ -325,7 +290,7 @@ class ExportPanel(QWidget):
         self.summary.setMinimumHeight(self.summary.fontMetrics().lineSpacing() * 2)
         self.preview_btn = QPushButton("Preview edit")
         self.preview_btn.setToolTip("Render a quick low-resolution version of the whole edit, with "
-                                    "transitions, text and music, and play it.")
+                                    "transitions, layers and music, and play it.")
         self.queue_btn = QPushButton("Export each clip…")
         self.queue_btn.setToolTip("Export every clip as its own file with these settings. "
                                   "Exports run one after another in the queue (Ctrl+J).")
@@ -613,8 +578,6 @@ class ExportPanel(QWidget):
 
         self.sec_frame.setVisible(visual)
         self.sec_frame.setEnabled(not copy)
-        self.sec_text.setVisible(visual)
-        self.sec_text.setEnabled(not copy)
         self.sec_music.setVisible(audio_out)
         self.sec_music.setEnabled(not copy)
         self.sec_trans.setEnabled(not copy)
@@ -641,18 +604,12 @@ class ExportPanel(QWidget):
         self.audio_bitrate.setVisible(self.extension != ".wav")
         self.transition.setEnabled(self.transition_on.isChecked())
         self.crossfade.setEnabled(self.transition_on.isChecked())
-        has_text = bool(self.text.toPlainText().strip())
-        for w in (self.text_pos, self.text_size, self.text_color, self.text_box, self.text_start,
-                  self.text_duration):
-            w.setEnabled(has_text)
-        for w in (self.logo_pos, self.logo_size, self.logo_opacity):
-            w.setEnabled(bool(self.logo.path()))
         self.preview_btn.setEnabled(kind != "audio")
         # Exporting while another export runs just adds it to the queue.
         self.export_btn.setEnabled(enc is not None or kind != "video" or copy)
 
     def settings(self) -> ExportSettings:
-        """Export settings without output path or overlays (the window renders those)."""
+        """Export settings without output path or overlays (the window renders the layers)."""
         kind = self.kind
         return ExportSettings(
             encoder=self.encoder.currentData() or "libx264",
@@ -682,21 +639,6 @@ class ExportPanel(QWidget):
             fade_in=self.fade_in.value(),
             fade_out=self.fade_out.value(),
         )
-
-    def overlay_spec(self) -> dict:
-        return {
-            "text": self.text.toPlainText().strip(),
-            "text_pos": self.text_pos.currentData(),
-            "text_size": self.text_size.value(),
-            "text_color": self.text_color.color(),
-            "text_box": self.text_box.isChecked(),
-            "text_start": self.text_start.value(),
-            "text_duration": self.text_duration.value(),
-            "logo": self.logo.path(),
-            "logo_pos": self.logo_pos.currentData(),
-            "logo_size": self.logo_size.value(),
-            "logo_opacity": self.logo_opacity.value() / 100,
-        }
 
     def save_state(self, q: QSettings):
         q.setValue("export/state", json.dumps(self.get_state()))

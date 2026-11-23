@@ -90,4 +90,7 @@ class MediaCache(QObject):
         # Called on a worker thread; the signal is queued to the GUI thread.
         self._images[key] = img
         self._pending.discard(key)
-        self.ready.emit(key[0], key[1], img)
+        try:
+            self.ready.emit(key[0], key[1], img)
+        except RuntimeError:
+            pass  # the window closed while this was being made
