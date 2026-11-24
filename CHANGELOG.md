@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-23
+
 ### Editing
 - **The player shows the output frame.** When you pick a shape (9:16, 1:1…), the player draws a box the shape of the export and dims everything outside it, so you can see exactly what gets cropped off. The blurred background shows inside the box when Fill is set to it.
 - **Zoom and move each clip.** Drag the picture in the player to move it, scroll to zoom (around the cursor), double-click to go back to the Fill setting. Under the player: a Zoom slider (10–400 %, where 100 % just fills the frame and lower values show bars or blur around the clip), **Fit**, **Fill**, **Centre**, **Reset** and **Apply to all**. Each clip keeps its own framing, the clip list shows "framed 120%", undo covers it and projects save it. The clip can't be pushed so far that a gap opens at the edge.

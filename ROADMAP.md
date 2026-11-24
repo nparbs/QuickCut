@@ -4,6 +4,12 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 
 ## Done
 
+### v0.4.0: framing and layers
+- [x] The player shows the output frame and dims what gets cropped off
+- [x] Zoom and move each clip (drag, scroll, Fit / Fill / Centre / Reset / Apply to all)
+- [x] Layers tab: any number of text and picture layers, each with its own timing, dragged and resized in the player
+- [x] Fixes from the 2026-11-15 code review (exporting over an existing file is now safe, copied projects use their own media)
+
 ### v0.3.1: split into parts, presets, autosave
 - [x] Split a video into parts of a set length (start time, part length, most parts), each part saved as its own file in a folder with the order and source times in the name, plus a `parts.csv` index
 - [x] Save your own export presets
