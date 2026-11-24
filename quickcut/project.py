@@ -42,6 +42,17 @@ def layer_to_dict(layer: Layer, project_dir: Path) -> dict:
     return data
 
 
+def _locate(path: str, relative: str | None, project_dir: Path) -> str | None:
+    """The file a project entry points at. The path relative to the project wins, so a folder
+    copied together with its media uses the copies even while the originals still exist."""
+    beside = os.path.normpath(project_dir / relative) if relative else ""
+    if beside and os.path.isfile(beside):
+        if path and os.path.isfile(path) and os.path.samefile(path, beside):
+            return path          # not moved: keep the path exactly as saved
+        return beside
+    return path if path and os.path.isfile(path) else None
+
+
 def layer_from_dict(entry: dict, project_dir: Path) -> Layer:
     layer = Layer()
     for key, value in entry.items():
@@ -50,10 +61,8 @@ def layer_from_dict(entry: dict, project_dir: Path) -> Layer:
                 setattr(layer, key, type(getattr(layer, key))(value))
             except (TypeError, ValueError):
                 pass
-    if layer.image and not os.path.isfile(layer.image) and entry.get("image_relative"):
-        moved = project_dir / entry["image_relative"]
-        if moved.is_file():
-            layer.image = str(moved)
+    if layer.image:
+        layer.image = _locate(layer.image, entry.get("image_relative"), project_dir) or layer.image
     if layer.kind not in ("text", "image"):
         layer.kind = "text"
     return layer
@@ -91,10 +100,7 @@ def load_project(path: str) -> tuple[list[dict], dict]:
     clips = []
     for entry in data.get("clips", []):
         entry = dict(entry)
-        candidates = [entry.get("path", "")]
-        if entry.get("relative"):
-            candidates.append(str(project_dir / entry["relative"]))
-        found = next((p for p in candidates if p and os.path.isfile(p)), None)
+        found = _locate(entry.get("path", ""), entry.get("relative"), project_dir)
         entry["missing"] = found is None
         if found:
             entry["path"] = found

@@ -59,7 +59,11 @@ class _Job(QRunnable):
         self.fn, self.done = fn, done
 
     def run(self):
-        self.done(self.fn())
+        try:
+            image = self.fn()
+        except Exception:  # noqa: BLE001 - a broken file shouldn't leave its job pending forever
+            image = QImage()
+        self.done(image)
 
 
 class MediaCache(QObject):

@@ -38,6 +38,10 @@ class ExportRunner(QObject):
         self._proc: QProcess | None = None
         self._started = 0.0
         self.warning = ""
+        # ffmpeg writes to a temporary file next to the output, so a failed or cancelled export
+        # never destroys a file that was already there. It replaces the output only on success.
+        base, ext = os.path.splitext(plan.output)
+        self._partial = f"{base}.quickcut-partial{ext}"
 
     def start(self):
         self._started = time.monotonic()
@@ -71,7 +75,7 @@ class ExportRunner(QObject):
         return " · ".join(parts)
 
     def _run_pass(self):
-        cmd = self.plan.passes[self._pass]
+        cmd = [self._partial if arg == self.plan.output else arg for arg in self.plan.passes[self._pass]]
         self._stderr = ""
         self._buffer = ""
         proc = QProcess(self)
@@ -144,7 +148,7 @@ class ExportRunner(QObject):
             self._run_pass()
             return
 
-        size = os.path.getsize(self.plan.output) if os.path.exists(self.plan.output) else 0
+        size = os.path.getsize(self._partial) if os.path.exists(self._partial) else 0
         retry = retry_plan_if_too_big(self.plan, size)
         if retry is not None:
             if self._retries < MAX_SIZE_RETRIES:
@@ -155,12 +159,18 @@ class ExportRunner(QObject):
             self.warning = (f"The file is {size / 1048576:.2f} MB, over the "
                             f"{self.plan.target_bytes / 1048576:.2f} MB target. The encoder can't go lower "
                             "at this resolution; try a lower resolution or frame rate.")
+        try:
+            os.replace(self._partial, self.plan.output)
+        except OSError as e:
+            self._remove_output()
+            self._finish(False, f"Couldn't save {self.plan.output}: {e.strerror or e}")
+            return
         self._finish(True, self.plan.output)
 
     def _remove_output(self):
         try:
-            if os.path.exists(self.plan.output):
-                os.remove(self.plan.output)
+            if os.path.exists(self._partial):
+                os.remove(self._partial)
         except OSError:
             pass
 

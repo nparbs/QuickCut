@@ -67,6 +67,18 @@ def test_project_relative_paths(tmp_path):
     assert (fresh.start, fresh.end, fresh.speed, fresh.rotate, fresh.reverse) == (1, 5, 2.0, 270, True)
     assert (fresh.volume, fresh.muted) == (1.5, True)
 
+    # A copy of the folder uses its own media, even though the originals are still there.
+    import shutil
+    save_project(str(moved / "p.qcut"), [Clip(_info(str(moved / "media" / "clip.mp4")))], {})
+    copy = moved.parent / (moved.name + "_copy")
+    shutil.copytree(moved, copy)
+    entries, _ = load_project(str(copy / "p.qcut"))
+    assert entries[0]["path"] == str(copy / "media" / "clip.mp4")
+    # When only the original is left, that's used.
+    (copy / "media" / "clip.mp4").unlink()
+    entries, _ = load_project(str(copy / "p.qcut"))
+    assert not entries[0]["missing"] and entries[0]["path"] == str(moved / "media" / "clip.mp4")
+
     # Projects saved before per-clip volume existed load with the defaults.
     old = {k: v for k, v in entries[0].items() if k not in ("volume", "muted")}
     older = Clip(_info(entries[0]["path"]))
@@ -210,3 +222,10 @@ def test_old_projects_turn_text_and_logo_into_layers(tmp_path):
     assert layers[1].y < 0.5 and layers[1].size == 8 and layers[1].end is None
     assert layers[0].x > 0.5 and abs(layers[0].opacity - 0.85) < 1e-9
     assert layers_from_old_settings({"text": "  ", "logo": ""}) == []
+
+
+def test_media_cache_job_that_raises_still_finishes():
+    from quickcut.media_cache import _Job
+    results = []
+    _Job(lambda: 1 / 0, results.append).run()
+    assert len(results) == 1 and results[0].isNull()

@@ -9,6 +9,10 @@
 
 ### Fixes
 - A thumbnail finishing just after the window closed could print an error.
+- **Exporting over an existing file no longer loses it if the export fails or is cancelled.** QuickCut writes to a temporary file next to it and only replaces the old file once the export has finished.
+- A project copied to a new folder together with its videos and pictures now uses the copies, even while the originals still exist in the old place.
+- An error while making a thumbnail, filmstrip or waveform no longer leaves that image stuck as still being made.
+- Finished exports no longer hold on to a little memory each until QuickCut closes.
 
 ## [0.3.1] - 2026-11-14
 

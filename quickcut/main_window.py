@@ -1643,6 +1643,7 @@ class MainWindow(QMainWindow):
 
         def done(ok: bool, message: str):
             self._preview_runner = None
+            runner.deleteLater()
             dialog.reset()
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)

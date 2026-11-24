@@ -509,3 +509,30 @@ def test_old_project_text_becomes_a_layer(win, media):
     win.open_project(path)
     assert [layer.kind for layer in win.layers] == ["image", "text"]
     assert win.layers[1].text == "Old caption"
+
+
+def test_failed_export_keeps_the_existing_file(app, media):
+    import dataclasses
+    from quickcut.command import build_plan
+    from quickcut.exporter import ExportRunner
+    from quickcut.models import Clip, ExportSettings
+    out = os.path.join(media["dir"], "keep.mp4")
+    with open(out, "wb") as f:
+        f.write(b"precious")
+    good = build_plan(TOOLS.ffmpeg, [Clip(probe(TOOLS, media["a"]))], ExportSettings(output=out, mode="preset"))
+    bad = dataclasses.replace(good, passes=[good.passes[0][:-1] + ["-no-such-option", out]], fallback=None)
+
+    def run(plan):
+        result = []
+        runner = ExportRunner(plan)
+        runner.finished.connect(lambda ok, msg: result.append(ok))
+        runner.start()
+        wait_for(lambda: result)
+        return result[0]
+
+    assert run(bad) is False
+    with open(out, "rb") as f:
+        assert f.read() == b"precious"
+    assert run(good) is True
+    assert probe(TOOLS, out).width == 1280
+    assert not [n for n in os.listdir(media["dir"]) if "quickcut-partial" in n]

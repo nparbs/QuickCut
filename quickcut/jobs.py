@@ -101,6 +101,7 @@ class JobQueue(QObject):
 
     def _on_finished(self, job: Job, ok: bool, message: str):
         runner, self._runner = self._runner, None
+        runner.deleteLater()
         self.current = None
         if ok:
             job.status, job.progress = DONE, 1.0
