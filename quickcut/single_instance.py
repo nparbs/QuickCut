@@ -14,10 +14,10 @@ SERVER_NAME = f"QuickCut-{getpass.getuser()}"
 HANDOFF_SECONDS = 8
 
 
-def send_to_running(files: list[str], timeout_ms: int = 800) -> bool:
+def send_to_running(files: list[str], timeout_ms: int = 800, name: str = SERVER_NAME) -> bool:
     """True if another QuickCut accepted the files (this process should then exit)."""
     sock = QLocalSocket()
-    sock.connectToServer(SERVER_NAME)
+    sock.connectToServer(name)
     if not sock.waitForConnected(timeout_ms):
         return False
     sock.write(json.dumps(files).encode("utf-8"))
@@ -30,14 +30,14 @@ def send_to_running(files: list[str], timeout_ms: int = 800) -> bool:
 class InstanceServer(QObject):
     filesReceived = Signal(list)
 
-    def __init__(self, lock: QLockFile | None = None, parent=None):
+    def __init__(self, lock: QLockFile | None = None, parent=None, name: str = SERVER_NAME):
         super().__init__(parent)
         self.lock = lock  # held for the life of the primary instance
         self.server = QLocalServer(self)
-        if not self.server.listen(SERVER_NAME):
+        if not self.server.listen(name):
             # A stale name from a crashed run; clear it and try again.
-            QLocalServer.removeServer(SERVER_NAME)
-            self.server.listen(SERVER_NAME)
+            QLocalServer.removeServer(name)
+            self.server.listen(name)
         self.server.newConnection.connect(self._accept)
 
     def close(self):
@@ -66,21 +66,22 @@ class InstanceServer(QObject):
             sock.disconnected.connect(done)
 
 
-def become_primary(files: list[str]) -> InstanceServer | None:
+def become_primary(files: list[str], name: str = SERVER_NAME) -> InstanceServer | None:
     """Returns a server if this process should open the window, or None if the files were
     handed to a QuickCut that's already running.
 
     Explorer starts one process per selected file, all at once; Windows lets several processes
     listen on the same pipe name, so a lock file decides which one becomes the window.
+    `name` keeps separate groups apart (the editor and the Convert to MP4 window).
     """
-    lock = QLockFile(os.path.join(tempfile.gettempdir(), f"{SERVER_NAME}.lock"))
+    lock = QLockFile(os.path.join(tempfile.gettempdir(), f"{name}.lock"))
     lock.setStaleLockTime(0)  # only a dead owner makes the lock stale, never its age
     deadline = time.monotonic() + HANDOFF_SECONDS
     while True:
         if lock.tryLock(50):
-            return InstanceServer(lock)
+            return InstanceServer(lock, name=name)
         # Someone else is (or is becoming) the primary; its server may need a moment to start.
-        if send_to_running(files, 300):
+        if send_to_running(files, 300, name):
             return None
         if time.monotonic() > deadline:
-            return InstanceServer()  # primary is stuck; open our own window rather than nothing
+            return InstanceServer(name=name)  # primary is stuck; open our own window rather than nothing

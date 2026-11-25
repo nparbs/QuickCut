@@ -17,7 +17,7 @@ It uses FFmpeg underneath and can encode on your GPU (NVIDIA, AMD or Intel).
 
 Get the latest **QuickCut-x.y.z-windows-x64.zip** from [Releases](https://github.com/nparbs/QuickCut/releases), extract it anywhere and run **QuickCut.exe**. FFmpeg is included and no install is needed.
 
-To open videos straight from Explorer, turn on **Tools → Add “Open with QuickCut” to Explorer**. On Windows 11 the entry is under *Show more options*.
+To work on videos straight from Explorer, turn on **Tools → Add QuickCut to Explorer’s right-click menu**. Right-clicking a video then offers **Open with QuickCut** and, for anything that isn't already an .mp4, **Convert to MP4 (QuickCut)**, which saves an .mp4 next to the original in a small progress window. On Windows 11 the entries are under *Show more options*.
 
 ## Features
 

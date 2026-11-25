@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Explorer
+- **Convert to MP4 from the right-click menu.** Right-click a .mov, .mkv, .avi or other video in Explorer → **Convert to MP4 (QuickCut)**. A small window shows the progress and saves `name.mp4` next to the original (or `name (1).mp4` if that's taken; nothing gets overwritten). When the video is already H.264 or HEVC (like most phone .mov files) it is copied as it is: done in a second or two with no quality loss. Anything else is re-encoded to H.264 + AAC, on the GPU when there is one. Select several files to convert them one after another in one window. The window closes itself a few seconds after everything worked, and stays open to show the error if a file failed.
+- The Tools menu entry is now **Add QuickCut to Explorer's right-click menu**. If you turned it on in an older version, QuickCut adds the new entry the next time it starts.
+
 ## [0.4.0] - 2026-11-23
 
 ### Editing

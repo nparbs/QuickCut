@@ -504,7 +504,7 @@ class MainWindow(QMainWindow):
         m.addAction(act)
 
         m = mb.addMenu("&Tools")
-        self.shell_act = self._action(m, "Add “Open with QuickCut” to Explorer", self._toggle_shell,
+        self.shell_act = self._action(m, "Add QuickCut to Explorer’s right-click menu", self._toggle_shell,
                                       checkable=True)
         self.shell_act.setEnabled(shell_integration.SUPPORTED)
         self.shell_act.setChecked(shell_integration.is_registered())
@@ -1665,8 +1665,8 @@ class MainWindow(QMainWindow):
         try:
             if on:
                 shell_integration.register()
-                self.statusBar().showMessage("Right-click a video in Explorer → Open with QuickCut "
-                                             "(on Windows 11 it's under “Show more options”).", 10000)
+                self.statusBar().showMessage("Right-click a video in Explorer → Open with QuickCut or "
+                                             "Convert to MP4 (on Windows 11 it's under “Show more options”).", 10000)
             else:
                 shell_integration.unregister()
         except OSError as exc:

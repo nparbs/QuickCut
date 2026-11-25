@@ -24,6 +24,7 @@ What's been built so far, what's known to be missing, and ideas for where QuickC
 - [x] The build script checks that the packaged app starts and uses its bundled FFmpeg
 - [x] GitHub Actions: tests on every push; on a `v*` tag it builds the zip and publishes a GitHub Release with notes from the changelog
 - [x] "Open with QuickCut" in the Explorer right-click menu (per user, toggled from the Tools menu)
+- [x] "Convert to MP4" in the Explorer right-click menu (copies MP4-friendly streams, re-encodes the rest)
 - [x] Single window: opening more files while QuickCut runs adds them to the open window
 - [x] Check for updates now, or on startup (opt-in)
 
